@@ -2,9 +2,10 @@
 
 SPRINTER is an algorithm that uses single-cell whole-genome DNA sequencing data to enable the accurate identification of actively replicating cells in both the S and G2 phases of the cell cycle and their assignment to distinct tumour clones, thus providing a proxy to estimate clone-specific proliferation rates.
 
-This repository includes detailed instructions for installation and requirements, demos with related tutorial of different CHISEL applications, a list of current issues, and contacts.
+This repository includes detailed instructions for installation and requirements, demos, a list of current issues, and contacts.
 A fully reproducible capsule for testing SPRINTER is available in CodeOcean at:
-[SPRINTER's CodeOcean capsule]()
+
+[SPRINTER's CodeOcean capsule](https://codeocean.com/capsule/9392115)
 
 ## Contents ##
 
@@ -21,12 +22,12 @@ A fully reproducible capsule for testing SPRINTER is available in CodeOcean at:
 
 During review, the installation and execution of SPRINTER can be tested using the reproducible capsule and reviewing the previously tested automatic runs available in CodeOcean at:
 
-[SPRINTER's CodeOcean capsule]()
+[SPRINTER's CodeOcean capsule](https://codeocean.com/capsule/9392115)
 
 <a name="setup"></a>
 ## Setup
 
-SPRINTER is written in Python 3 and will be packaged and distributed through [bioconda](https://bioconda.github.io/). During review, SPRINTER installation has been automatically tested using the available [SPRINTER CodeOcean capsule]() and can be installed directly from source following the instructions below.
+SPRINTER is written in Python 3 and will be packaged and distributed through [bioconda](https://bioconda.github.io/). During review, SPRINTER installation has been automatically tested using the available [SPRINTER CodeOcean capsule](https://codeocean.com/capsule/9392115) and can be installed directly from source following the instructions below.
 
 1. [Manual installation](#manual): installs CHISEL from source with conda.
 2. [Basic requirements](#reqs): list of requirements.
@@ -53,12 +54,12 @@ Lastly, `sprinter` can be used within the created environment (`conda activate s
 ```shell
 python bin/sprinter.py
 ```
-as demonstrated in the [SPRINTER CodeOcean capsule]().
+as demonstrated in the [SPRINTER CodeOcean capsule](https://codeocean.com/capsule/9392115).
 
 <a name="reqs"></a>
 ### Basic requirements
 
-SPRINTER depends on the following standard python packages, which must be available in the python environment where the user runs CHISEL.
+SPRINTER depends on the following standard python packages, which must be available in the python environment where the user runs SPRINTER.
 
 | Package | Tested version |
 |---------|----------------|
@@ -109,7 +110,7 @@ However, input data with higher number of cells will require machines with more 
 <a name="demos"></a>
 ### Demos
 
-Two demos applying SPRINTER on 1000 diploid and tetraploid cells from the generated ground truth are available in the [SPRINTER's CodeOcean capsule]().
+Two demos applying SPRINTER on 1000 diploid and tetraploid cells from the generated ground truth are available in the [SPRINTER's CodeOcean capsule](https://codeocean.com/capsule/9392115).
 
 <a name="contacts"></a>
 ## Contacts
