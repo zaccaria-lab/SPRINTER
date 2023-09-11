@@ -27,7 +27,7 @@ During review, the installation and execution of SPRINTER can be tested using th
 <a name="setup"></a>
 ## Setup
 
-SPRINTER is written in Python 3 and will be packaged and distributed through [bioconda](https://bioconda.github.io/). During review, SPRINTER installation has been automatically tested using the available [SPRINTER CodeOcean capsule](https://codeocean.com/capsule/9392115) and can be installed directly from source following the instructions below.
+SPRINTER is written in Python3 and will be packaged and distributed through [bioconda](https://bioconda.github.io/). During review, SPRINTER installation has been automatically tested using the available [SPRINTER CodeOcean capsule](https://codeocean.com/capsule/9392115) and can be installed directly from source following the instructions below.
 
 1. [Manual installation](#manual): installs CHISEL from source with conda.
 2. [Basic requirements](#reqs): list of requirements.
