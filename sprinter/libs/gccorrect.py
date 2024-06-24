@@ -7,7 +7,12 @@ from statsmodels.nonparametric.smoothers_lowess import lowess
 
 
 
-def estimate_gcbiases(_data, gccorr, jobs):
+def estimate_gcbiases(data, gccorr, fastsphase, jobs):
+    _data = data if not fastsphase else data.groupby(['CELL', 'CHR', 'BIN_REPINF'])\
+                                            .first().reset_index()\
+                                            .sort_values(['CHR', 'START', 'END'])\
+                                            .reset_index(drop=True)
+    _data = _data[(~pd.isnull(_data['RAW_RDR'])) & _data['FOR_REP']].reset_index(drop=True)
     gc_res = None
     with Manager() as manager:
         with Pool(processes=min(jobs, _data['CELL'].nunique()),
@@ -83,8 +88,7 @@ def correct_gcbias(linregress, label, min_cells=100):
     maj_predict = [p for p in linregress['PREDICT'].unique() if p != out_predict][0]
     linregress['IS_OUT'] = (linregress['PREDICT'] == out_predict) & (linregress['SLOPE'] > scipy.stats.norm.interval(0.9, *params[maj_predict])[1]) & (linregress['SLOPE'] >= 0.0)
     is_corrected = False
-    if ((linregress['IS_OUT'].value_counts()[False] / len(linregress)) >= 0.5) and (linregress['IS_OUT'].any()) and (len(linregress) >= min_cells) \
-        and (params[maj_predict][0] < 2):
+    if ((linregress['IS_OUT'].value_counts()[False] / len(linregress)) >= 0.5) and (linregress['IS_OUT'].any()) and (len(linregress) >= min_cells):# \
         is_corrected = True
         linregress['SLOPE'] = linregress['SLOPE'].where(~linregress['IS_OUT'], params[maj_predict][0])
         ref_slopes = linregress[~linregress['IS_OUT']]['SLOPE']
@@ -99,7 +103,6 @@ def correct_gcbias(linregress, label, min_cells=100):
     plt.savefig('gccorr_{}.png'.format(label), dpi=600, bbox_inches='tight')
     linregress.to_csv('gccorr_{}.tsv.gz'.format(label), sep='\t')
     return linregress
-
 
 def quantile_gccorrect_rdr(_data, _gcbiases, nocorrgcintercept, strictgc, _timing, _maxrdr, toplot, boot_samples=10000, gc_pieces=100):
     with warnings.catch_warnings():
@@ -120,7 +123,7 @@ def quantile_gccorrect_rdr(_data, _gcbiases, nocorrgcintercept, strictgc, _timin
             late = smf.quantreg('RAW_RDR ~ GC', data=df[df[_timing]=='late']).fit(q=.5)
             params = [(D.params['GC'], D.params['Intercept'], T) for D, T in [(call, 'ALL'), (early, 'EARLY'), (late, 'LATE')]]
 
-        if strictgc or any(p[0] > 2 for p in params):
+        if strictgc:
             chosen = max(params, key=(lambda x : x[0]))[:2]
         else:
             chosen = (np.mean([p[0] for p in params]), np.mean([p[1] for p in params]))
@@ -137,15 +140,12 @@ def quantile_gccorrect_rdr(_data, _gcbiases, nocorrgcintercept, strictgc, _timin
             sns.scatterplot(data=df, x='GC', y='RAW_RDR', hue='consistent_rt', hue_order=['not_consistent', 'late', 'early'], palette=['lightgray', 'green', 'magenta'], s=4, alpha=.5, legend=False)
             plt.xlim(.2, .7)
             plt.ylim(0, 2.2)
-            plt.plot(df['GC'], call.predict(df[['GC']]), ls='--', lw=2, c='black')
-            plt.plot(df['GC'], late.predict(df[['GC']]), ls='--', lw=2, c='green')
-            plt.plot(df['GC'], early.predict(df[['GC']]), ls='--', lw=2, c='magenta')
-
-        correction = ((df['consistent_rt'] == 'late').astype(int) * (_corr + h) + \
-                      (df['consistent_rt'] == 'early').astype(int) * (_corr + h) + \
-                      (df['consistent_rt'] == 'not_consistent').astype(int) * _corr)
-        return correction, {'GC_SLOPE' : chosen_slope,
-                            'GC_INTERCEPT' : chosen_intercept + h}
+            if _gcbiases is None:
+                plt.plot(df['GC'], call.predict(df[['GC']]), ls='--', lw=2, c='black')
+                plt.plot(df['GC'], late.predict(df[['GC']]), ls='--', lw=2, c='green')
+                plt.plot(df['GC'], early.predict(df[['GC']]), ls='--', lw=2, c='magenta')
+        return {'GC_SLOPE' : chosen_slope,
+                'GC_INTERCEPT' : chosen_intercept + h}
 
 
 def modal_gccorrect_rdr(_data, _gcbiases, nocorrgcintercept, strictgc, _timing, _maxrdr, toplot, boot_samples=10000, gc_pieces=100):    
@@ -218,12 +218,8 @@ def modal_gccorrect_rdr(_data, _gcbiases, nocorrgcintercept, strictgc, _timing, 
             plt.plot(df['GC'], (all_slope * df['GC'] + all_intercept), ls='--', lw=2, c='black')
             plt.plot(df['GC'], (late_slope * df['GC'] + late_intercept), ls='--', lw=2, c='green')
             plt.plot(df['GC'], (early_slope * df['GC'] + early_intercept), ls='--', lw=2, c='magenta')
-
-        correction = ((df['consistent_rt'] == 'late').astype(int) * (_corr + h) + \
-                      (df['consistent_rt'] == 'early').astype(int) * (_corr + h) + \
-                      (df['consistent_rt'] == 'not_consistent').astype(int) * _corr)
-        return correction, {'GC_SLOPE' : chosen_slope,
-                            'GC_INTERCEPT' : chosen_intercept + h}
+        return {'GC_SLOPE' : chosen_slope,
+                'GC_INTERCEPT' : chosen_intercept + h}
 
 
 def coordinate_descent(_obj, _df):
@@ -242,3 +238,4 @@ def coordinate_descent_rep(initial_slope, initial_intercept, _obj):
     get_intercept = (lambda _slope : (_slope, extract_minimize(minimize((lambda _intercept : _obj(_slope, _intercept)), method='bounded', options={'xatol' : 1e-3}, bounds=(initial_intercept - 3, initial_intercept + 3)))))
     _ = [solutions.append(get_intercept(get_slope(solutions[-1][1]))) for _ in range(5) if not np.isclose(all_objectives[-1], all_objectives[-2])]
     return solutions[-1][0], solutions[-1][1], all_objectives[-1]
+

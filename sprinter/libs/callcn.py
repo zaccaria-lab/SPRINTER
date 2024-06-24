@@ -10,95 +10,97 @@ import statsmodels.formula.api as smf
 
 
 
-def correct_sphase(rtprofile, annotations):
-    data = rtprofile.merge(annotations[['CELL', 'IS-S-PHASE']], on='CELL', how='inner')
-    nonrep = data[data['IS-S-PHASE'] == False].reset_index(drop=True)
-    nonrep['RDR_RTCORR'] = nonrep.groupby('CELL')['RDR'].transform(lambda array : array / array.mean())
-    rep = data[data['IS-S-PHASE'] == True].reset_index(drop=True)
-    rep['RT_CORR'] = rep.groupby(['CELL', 'RT_CN_STATE'])['RDR'].transform('median')
-    rep['RDR_RTCORR'] = np.where(rep['RT_CORR'] > 0, (rep['RDR'] / rep['RT_CORR']) * rep['MERGED_RDR_MEDIAN'], 0.)
-    rep['RDR_RTCORR'] = rep.groupby('CELL')['RDR_RTCORR'].transform(lambda array : (array / array.mean()) if array.mean() > 0 else 0.)
-    assert (not np.isinf(rep['MERGED_RDR_MEDIAN'].values).any()) and (not pd.isnull(rep['MERGED_RDR_MEDIAN'].values).any()), rep['MERGED_RDR_MEDIAN']
-    assert (not np.isinf(rep['RT_CORR'].values).any()) and (not pd.isnull(rep['RT_CORR'].values).any()), rep['RT_CORR']
-    assert (not np.isinf(rep['RDR_RTCORR'].values).any()) and (not pd.isnull(rep['RDR_RTCORR'].values).any()), rep['RDR_RTCORR']
-    return pd.concat([rep, nonrep])
 
-
-def call_cns_g1g2(rawdata, rtprofile, annotations, max_ploidy=4, frac_covered=0.2, jobs=1):
-    g1g2, data = process_cns_data(annotations, rawdata, rtprofile, frac_covered)
+def call_cns_g1g2(rawdata, annotations, max_ploidy=4, fixed_ploidy=None, fixed_cns=None, fastcns=True, frac_covered=0.2, jobs=1):
+    fixed_ploidy = process_fixed_ploidy(fixed_ploidy) if fixed_ploidy is not None else None
+    g1g2 = annotations[annotations['IS-S-PHASE']==False]['CELL'].unique()
+    cn_g1g2 = rawdata[rawdata['CELL'].isin(g1g2)]
+    if fixed_cns is not None:
+        fixed_ploidy = fixed_cns.groupby('CELL')['CN_TOT'].mean().to_dict()
     with Manager() as manager:
         shared = manager.list()
-        with Pool(processes=jobs, initializer=init_call_cns, initargs=(manager.dict({cell : celldf for cell, celldf in data.groupby('CELL')}),
-                                                                       max_ploidy,
-                                                                       shared)) as pool:
-            bar = ProgressBar(total=data['CELL'].nunique(), length=30, verbose=False)
+        with Pool(processes=jobs, 
+                  initializer=init_call_cns, 
+                  initargs=(manager.dict({cell : celldf for cell, celldf in cn_g1g2.groupby('CELL')}),
+                            max_ploidy,
+                            shared,
+                            manager.dict(fixed_ploidy) if fixed_ploidy is not None else None,
+                            manager.dict({cell : celldf for cell, celldf in fixed_cns.groupby('CELL')}) if fixed_cns is not None else None,
+                            fastcns)) \
+        as pool:
+            bar = ProgressBar(total=cn_g1g2['CELL'].nunique(), length=30, verbose=False)
             progress = (lambda e : bar.progress(advance=True, msg="Cell {}".format(e)))
             bar.progress(advance=False, msg="Started")
-            _ = [cell for cell in pool.imap_unordered(call_cns, (cell for cell in data['CELL'].unique())) if progress(cell)]
-        data = pd.concat(shared)
-    data = unify_cns(data, rawdata, g1g2)
-    return data
+            _ = [cell for cell in pool.imap_unordered(call_cns, (cell for cell in cn_g1g2['CELL'].unique())) if progress(cell)]
+        cn_g1g2 = pd.concat(shared)
+    return cn_g1g2
 
 
-def process_cns_data(annotations, rawdata, rtprofile, frac_covered, max_rdr=3.):
-    g1g2 = annotations[annotations['IS-S-PHASE']==False]['CELL'].unique()
-    data = rawdata[rawdata['CELL'].isin(g1g2)].merge(rtprofile[['CELL', 'CHR', 'BIN_REPINF', 'MERGED_CN_STATE', 'RDR_RTCORR']].assign(COV_RAW_BINS=1),
-                                                     on=['CELL', 'CHR', 'BIN_REPINF'], how='inner')
-    data['RDR_RTCORR'] = data['RDR_RTCORR'].clip(0, max_rdr)
-    median_counts = rtprofile.groupby('CELL')['COUNT'].median()
-    data['COUNT_RTCORR'] = data['RDR_RTCORR'] * data['CELL'].map(median_counts)
-    data = data.groupby(['CELL', 'CHR', 'BIN_CNSINF']).agg({'START' : 'min',
-                                                            'END' : 'max',
-                                                            'GENOME' : 'min',
-                                                            'NORM_COUNT' : 'sum',
-                                                            'COUNT' : 'sum',
-                                                            'GC' : 'mean',
-                                                            'RDR_RTCORR' : 'median',
-                                                            'COUNT_RTCORR' : 'sum',
-                                                            'MERGED_CN_STATE' : (lambda v : v.value_counts().index[0] if (~pd.isnull(v)).any() else np.nan),
-                                                            'COV_RAW_BINS' : 'sum'})\
-                                                      .reset_index()\
-                                                      .sort_values(['CELL', 'CHR', 'START', 'END'])\
-                                                      .reset_index(drop=True)
-    assert (not data['COUNT'].isna().any()) & (not data['NORM_COUNT'].isna().any()) & (not data['GC'].isna().any())
-    tot_raw_bins = rawdata[rawdata['CELL'].isin(g1g2)][['CELL', 'CHR', 'BIN_CNSINF', 'START']]\
-                   .groupby(['CELL', 'CHR', 'BIN_CNSINF'])['START'].count().rename('TOT_RAW_BINS').reset_index()
-    data = data.merge(tot_raw_bins, on=['CELL', 'CHR', 'BIN_CNSINF'], how='inner')
-    data['FRAC_COVERED'] = data['COV_RAW_BINS'] / data['TOT_RAW_BINS']
-    assert (data['FRAC_COVERED'] <= 1.).all()
-    data = data[data['FRAC_COVERED'] >= frac_covered].sort_values(['CELL', 'CHR', 'START', 'END']).reset_index(drop=True)
-    return g1g2, data
-
-
-def init_call_cns(_data, _max_ploidy, _shared):
-    global DATA, MAXPLOIDY, SHARED
+def init_call_cns(_data, _max_ploidy, _shared, _fixed_ploidy, _fixed_cns, _fastcns):
+    global DATA, MAXPLOIDY, SHARED, FIXED_PLOIDY, FIXED_CNS, FASTCNS
     DATA = _data
     MAXPLOIDY = _max_ploidy
     SHARED = _shared
+    FIXED_PLOIDY = _fixed_ploidy
+    FIXED_CNS = _fixed_cns
+    FASTCNS = _fastcns
 
 
 def call_cns(cell):
-    celldf = DATA[cell].sort_values(['CHR', 'START', 'END']).reset_index(drop=True)
-    assert (not celldf['RDR_RTCORR'].isna().any()) & (not celldf['RDR_RTCORR'].apply(np.isinf).any())
+    if not FASTCNS:
+        celldf = DATA[cell].sort_values(['CHR', 'START', 'END']).reset_index(drop=True)
+    else:
+        celldf = DATA[cell].groupby(['CELL', 'CHR', 'BIN_CNSINF'])\
+                           .first().reset_index()\
+                           .sort_values(['CHR', 'START', 'END'])\
+                           .reset_index(drop=True)
+        
+    ret_cell = ''
+    assert (not celldf['RDR_CN'].isna().any()) & (not celldf['RDR_CN'].apply(np.isinf).any())
     with open(os.devnull, 'w') as devnull:
-        with contextlib.redirect_stderr(devnull):
-            celldf['CN_TOT'] = infer_cns_free(celldf, repetitions=5, max_ploidy=MAXPLOIDY, ispoisson=False)[2]
-    SHARED.append(celldf[['CELL', 'CHR', 'BIN_CNSINF', 'MERGED_CN_STATE', 'RDR_RTCORR', 'CN_TOT']])
-    return cell
+        with contextlib.redirect_stderr(devnull): #, contextlib.redirect_stdout(devnull):
+            if FIXED_PLOIDY is None or cell not in FIXED_PLOIDY:
+                celldf['CN_TOT'] = infer_cns_free(celldf, repetitions=5, max_ploidy=MAXPLOIDY, ispoisson=False)[2]            
+            else:
+                celldf['CN_TOT'] = infer_cns_fixed(celldf, ploidy=FIXED_PLOIDY[cell], ispoisson=False)
+                ret_cell = '_fixep'
+    if FIXED_CNS is not None and cell in FIXED_CNS:
+        overlapped_fixed = overlap_fixed_cns(celldf, FIXED_CNS[cell])
+        celldf['CN_TOT'] = overlapped_fixed.where(~pd.isnull(overlapped_fixed), celldf['CN_TOT'])
+        ret_cell += '_fixedcns'
+
+    if not FASTCNS:
+        SHARED.append(celldf[['CELL', 'CHR', 'START', 'END', 'GENOME', 'BIN_CNSINF', 'BIN_GLOBAL', 'MERGED_CN_STATE', 'RDR_CN', 'CN_TOT']])
+    else:
+        SHARED.append(DATA[cell][['CELL', 'CHR', 'START', 'END', 'GENOME', 'BIN_CNSINF', 'BIN_GLOBAL', 'MERGED_CN_STATE', 'RDR_CN']]\
+                                .merge(celldf[['CELL', 'CHR', 'BIN_CNSINF', 'CN_TOT']],
+                                       on=['CELL', 'CHR', 'BIN_CNSINF'],
+                                       how='outer')\
+                                .sort_values(['CHR', 'START', 'END'])\
+                                .reset_index(drop=True))
+    return cell + ret_cell
 
 
-def infer_cns_free(data, repetitions, max_ploidy, min_aneu=0.1, ispoisson=False):
-    ref = data[data['MERGED_CN_STATE'] == data.groupby('MERGED_CN_STATE')['START'].count().idxmax()]['RDR_RTCORR'].to_numpy()
+def infer_cns_free(data, repetitions, max_ploidy, min_aneu=0.1, ispoisson=False, min_ref_rdr=0.4):
+    size_state = data.groupby('MERGED_CN_STATE')['START'].count()
+    sel_states = data.groupby('MERGED_CN_STATE')['RDR_CN'].median()
+    sel_states = sel_states[sel_states > min_ref_rdr]
+    ref_state = size_state[sel_states.index].idxmax() if len(sel_states) > 0 else size_state.idxmax()
+    ref = data[data['MERGED_CN_STATE'] == ref_state]['RDR_CN'].to_numpy()    
     get_var = (lambda X : X.clip(*scipy.stats.norm.interval(0.99, *scipy.stats.norm.fit(X))).var(ddof=1))
-    var = data.groupby('MERGED_CN_STATE')['RDR_RTCORR'].apply(lambda x : get_var(x) * len(x)).sum() / len(data)
-    trans = data['MERGED_CN_STATE'].nunique() / len(data)
+    var = np.median(scipy.stats.trimboth(data.groupby('MERGED_CN_STATE')['RDR_CN'].transform(get_var).dropna(), 0.05))
+    segs = data[['MERGED_CN_STATE']].reset_index(drop=True)
+    segs['SEG'] = ((segs['MERGED_CN_STATE'] != segs['MERGED_CN_STATE'].shift(1)) & 
+                   (~(pd.isnull(segs['MERGED_CN_STATE']) & pd.isnull(segs['MERGED_CN_STATE'].shift(1))))).cumsum()
+    segs = segs[segs['SEG'].isin((segs.groupby('SEG')['MERGED_CN_STATE'].count() > 2).index)]
+    trans = segs['SEG'].nunique() / segs.shape[0]
     if not ispoisson:
-        rdrs = data['RDR_RTCORR'].to_numpy()
+        rdrs = data['RDR_CN'].to_numpy()
         brdr = np.median(ref)
     else:
         scale = data['COUNT'].median()
-        rdrs = (data['RDR_RTCORR'] * scale).round().astype(int).to_numpy()
-        brdr = np.round((np.median(ref) * scale)) # cn = rdr * gamma
+        rdrs = (data['RDR_CN'] * scale).round().astype(int).to_numpy()
+        brdr = np.round((np.median(ref) * scale))
     argmax = (lambda L : max(L, key=(lambda v : v[0])))
     compute_n = (lambda cn : argmax(infer_cns_hmm(rdrs, gamma=cn/brdr, var=var, trans=trans, ispoisson=ispoisson) for _ in range(repetitions)))
     candidate = min((compute_n(n) for n in range(2, max_ploidy + 1)), key=(lambda v : v[1]))
@@ -106,6 +108,24 @@ def infer_cns_free(data, repetitions, max_ploidy, min_aneu=0.1, ispoisson=False)
         return candidate
     else:
         return compute_n(2)
+    
+
+def infer_cns_fixed(data, ploidy, ispoisson=False):
+    assert not pd.isnull(data['RDR_CN']).any()
+    get_var = (lambda X : X.clip(*scipy.stats.norm.interval(0.99, *scipy.stats.norm.fit(X))).var(ddof=1))
+    var = np.median(scipy.stats.trimboth(data.groupby('MERGED_CN_STATE')['RDR_CN'].transform(get_var).dropna(), 0.05))
+    segs = data[['MERGED_CN_STATE']].reset_index(drop=True)
+    segs['SEG'] = ((segs['MERGED_CN_STATE'] != segs['MERGED_CN_STATE'].shift(1)) & 
+                   (~(pd.isnull(segs['MERGED_CN_STATE']) & pd.isnull(segs['MERGED_CN_STATE'].shift(1))))).cumsum()
+    segs = segs[segs['SEG'].isin((segs.groupby('SEG')['MERGED_CN_STATE'].count() > 2).index)]
+    trans = segs['SEG'].nunique() / segs.shape[0]
+    norm = (lambda v : v / v.mean())
+    if not ispoisson:
+        rdrs = norm(data['RDR_CN'].to_numpy())
+    else:
+        scale = data['COUNT'].median()
+        rdrs = norm((data['RDR_CN'] * scale).round().astype(int).to_numpy())
+    return infer_cns_hmm(rdrs, gamma=ploidy, var=var, trans=trans, ispoisson=ispoisson)[2]
 
 
 def infer_cns_hmm(data, gamma, var=None, trans=None, ispoisson=True, seed=None):
@@ -127,8 +147,9 @@ def infer_cns_hmm(data, gamma, var=None, trans=None, ispoisson=True, seed=None):
     if trans is None:
         remodel.transmat_ = np.array([np.random.dirichlet(alphas) for alphas in (np.identity(n_components) * 200) + 1])
     else:
-        remodel.transmat_ = np.identity(n_components) * (1. - (trans * n_components)) + trans
-        assert all(np.isclose(row.sum(), 1.) for row in np.identity(n_components) * (1. - (trans * n_components)) + trans)
+        remodel.transmat_ = (np.identity(n_components) * (1. - trans - (trans / (n_components - 1)))) + (trans / (n_components - 1))
+        assert np.all(remodel.transmat_ > 0.)
+        assert all(np.isclose(row.sum(), 1.) for row in remodel.transmat_)
     remodel.startprob_ = np.ones(n_components) / n_components
     fitted = remodel.fit(data.reshape(-1, 1))
     if any(~np.isclose(row.sum(), 1.) for row in fitted.transmat_):
@@ -148,35 +169,23 @@ def infer_cns_hmm(data, gamma, var=None, trans=None, ispoisson=True, seed=None):
     else:
         score = bic(loglik, data.size, 2 + n_components + used_comp)
 
-    T = pd.DataFrame({'RDR_RTCORR' : data, 'CN_TOT' : hstates}).reset_index()
-    plt.figure(figsize=(14, 4))
-    sns.scatterplot(data=T, x='index', y='RDR_RTCORR', hue='CN_TOT', s=7, palette='Set1')
-    for mean in remodel.means_:
-        plt.axhline(mean[0], ls='--', c='k', lw=1)
-    plt.title('ll {} - bic {} - used comp {} - var {}'.format(loglik, score, used_comp, var))
-    
     return (loglik, score, hstates, used_comp)
 
 
-def unify_cns(data, rawdata, g1g2):
-    data = data.merge(rawdata[rawdata['CELL'].isin(g1g2)][['CELL', 'CHR', 'START', 'END', 'GENOME', 'BIN_CNSINF', 'COUNT', 'BIN_GLOBAL']], 
-                      on=['CELL', 'CHR', 'BIN_CNSINF'], how='outer')\
-               .sort_values(['CELL', 'CHR', 'START'])\
-               .reset_index(drop=True)
-    data = data.groupby(['CELL', 'CHR', 'BIN_GLOBAL']).agg({'START' : 'min',
-                                                            'END' : 'max',
-                                                            'GENOME' : 'min',
-                                                            'COUNT' : 'sum',
-                                                            'MERGED_CN_STATE' : (lambda v : v.value_counts(dropna=False).index[0]),
-                                                            'RDR_RTCORR' : 'median',
-                                                            'CN_TOT' : (lambda v : v.value_counts(dropna=False).index[0])})\
-                                                      .reset_index()\
-                                                      .sort_values(['CELL', 'CHR', 'START', 'END'])\
-                                                      .reset_index(drop=True)
-    data['CN_TOT'] = data.groupby(['CELL', 'CHR'])['CN_TOT'].transform(lambda x : x.where(~pd.isnull(x), prev_else_next(x)))
-    cell_mode = data.groupby('CELL')['CN_TOT'].transform(lambda x : x.value_counts().index[0])
-    data['CN_TOT'] = data['CN_TOT'].where(~pd.isnull(data['CN_TOT']), cell_mode).round().astype(int)
-    bins = data[['CHR', 'START', 'END']].drop_duplicates().sort_values(['CHR', 'START', 'END']).reset_index(drop=True)
-    assert all(bins.equals(df.drop_duplicates().sort_values(['CHR', 'START', 'END']).reset_index(drop=True)) for _, df in data.groupby('CELL')[['CHR', 'START', 'END']])
-    return data
+def overlap_fixed_cns(ref, fixed):
+    assert set(fixed.columns) == {'CHR', 'S', 'E', 'CN_TOT'}
+
+    def overlap_cns(R, F):
+        comb = R.merge(F, on='CHR', how='left')
+        comb['OVERLAP'] = np.minimum(comb['END'], comb['E']) - np.maximum(comb['START'], comb['S'])
+        return comb.groupby(['CHR', 'START', 'END'], sort=False).apply(lambda X : X.sort_values('OVERLAP', ascending=False).iloc[0])
+
+    result = ref.groupby('CHR', sort=False).apply(lambda X : overlap_cns(X, fixed[fixed['CHR']==X.name]))
+    assert ref[['CHR', 'START', 'END']].reset_index(drop=True).equals(result[['CHR', 'START', 'END']].reset_index(drop=True))
+    return result['CN_TOT']
+
+
+def process_fixed_ploidy(fdata):
+    fixed_ploidy = pd.read_csv(fdata, sep='\t')
+    return
 

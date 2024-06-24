@@ -18,9 +18,10 @@ default_values = {
         'rdr_profile' : 'RT_PROFILE',
         'maxrdr' : 3.0,
         'maxrtrdr' : 3.0,
-        'shared_rtprofiles' : dict(),
+        'shared_rtprofiles' : None,
         'toplot' : False,
-        'quantile' : .05
+        'quantile' : .05,
+        'fastsphase' : False
 }
 
 
@@ -33,6 +34,7 @@ def run(_data,
         gccorr=default_values['gccorr'],
         strictgc=default_values['strictgc'],
         nocorrgcintercept=default_values['nocorrgcintercept'],
+        fastsphase=default_values['fastsphase'],
         _timing=default_values['timing'],
         _gmm=default_values['gmm'],
         _maxcn=default_values['maxcn'],
@@ -67,6 +69,7 @@ def run(_data,
                             gccorr,
                             strictgc,
                             nocorrgcintercept,
+                            fastsphase,
                             manager.dict(gcbiases) if gcbiases is not None else None)) as pool:
 
                 jobs = tuple(zip(_data['CELL'].unique(), np.random.randint(1e6, size=_data['CELL'].nunique())))
@@ -96,10 +99,11 @@ def init_run(_data,
              _gccorr,
              _strictgc,
              _nocorrgcintercept,
+             _fastsphase,
              _gcbiases):
      global data, timing, gmm, maxcn, reps, maxrdr, data, seg, permutations,\
             permethod, testmethod, meanmethod, timing, rdr_profile, maxrtrdr, quantile,\
-            shared_rtprofiles, gccorr, strictgc, nocorrgcintercept, gcbiases
+            shared_rtprofiles, gccorr, strictgc, nocorrgcintercept, fastsphase, gcbiases
      data = _data
      seg = _seg
      testmethod = _testmethod
@@ -118,6 +122,7 @@ def init_run(_data,
      gccorr = _gccorr
      strictgc = _strictgc
      nocorrgcintercept = _nocorrgcintercept
+     fastsphase = _fastsphase
      gcbiases = _gcbiases
 
 
@@ -127,7 +132,7 @@ def infer(job):
      return infer_local(cell, _data=data, _seg=seg, _testmethod=testmethod, _meanmethod=meanmethod, _timing=timing,
                         _gmm=gmm, _maxcn=maxcn, _reps=reps, _permutations=permutations, _permethod=permethod,
                         _rdr_profile=rdr_profile, _maxrdr=maxrdr, _maxrtrdr=maxrtrdr, _quantile=quantile,
-                        shared_rtprofiles=shared_rtprofiles, gccorr=gccorr, strictgc=strictgc, nocorrgcintercept=nocorrgcintercept, gcbiases=gcbiases)
+                        shared_rtprofiles=shared_rtprofiles, gccorr=gccorr, strictgc=strictgc, nocorrgcintercept=nocorrgcintercept, fastsphase=fastsphase, gcbiases=gcbiases)
 
 
 def infer_local(cell,
@@ -139,6 +144,7 @@ def infer_local(cell,
                 gccorr=default_values['gccorr'],
                 strictgc=default_values['strictgc'],
                 nocorrgcintercept=default_values['nocorrgcintercept'],
+                fastsphase=default_values['fastsphase'],
                 _timing=default_values['timing'],
                 _gmm=default_values['gmm'],
                 _maxcn=default_values['maxcn'],
@@ -152,23 +158,37 @@ def infer_local(cell,
                 shared_rtprofiles=default_values['shared_rtprofiles'],
                 toplot=default_values['toplot']):
 
-        columns = ['CELL', 'CHR', 'START', 'END', 'GENOME', 'BIN_REPINF', 'COUNT', 'NORM_COUNT', _timing, 'GC', 'RAW_RDR']
-        data = _data[cell][columns].drop_duplicates().sort_values(['CHR', 'START', 'END']).reset_index(drop=True)
+        columns = ['CELL', 'CHR', 'START', 'END', 'GENOME', 'BIN_REPINF', 'BIN_CNSINF', 'FOR_REP', _timing, 'GC', 'RAW_RDR']
+        origdata = _data[cell][columns].drop_duplicates().sort_values(['CHR', 'START', 'END']).reset_index(drop=True)
 
-        data, gccorr_feat = rtp.profile_local(cell,
-                                              _data=data,
-                                              seg=_seg,
-                                              shared_rtprofiles=shared_rtprofiles,
-                                              _timing=_timing,
-                                              _gmm=_gmm, 
-                                              _maxcn=_maxcn,
-                                              _reps=_reps,
-                                              _maxrdr=_maxrdr,
-                                              toplot=toplot,
-                                              gccorr=gccorr,
-                                              strictgc=strictgc,
-                                              nocorrgcintercept=nocorrgcintercept,
-                                              gcbiases=gcbiases)
+        origdata, gccorr_feat = rtp.profile_gccorr(_data=origdata,
+                                                   _timing=_timing,
+                                                   _maxrdr=_maxrdr,
+                                                   toplot=toplot,
+                                                   gccorr=gccorr,
+                                                   strictgc=strictgc,
+                                                   nocorrgcintercept=nocorrgcintercept,
+                                                   gcbiases=gcbiases,
+                                                   fastsphase=fastsphase)
+        
+        data = None
+        if not fastsphase:
+                data = origdata.reset_index(drop=True)
+        else:
+                data = origdata.groupby(['CELL', 'CHR', 'BIN_REPINF'])\
+                               .first().reset_index()\
+                               .sort_values(['CHR', 'START', 'END'])\
+                               .reset_index(drop=True)
+        data = data[(~pd.isnull(data['RAW_RDR'])) & data['FOR_REP']].reset_index(drop=True)
+
+        data = rtp.profile_local(cell,
+                                 data=data,
+                                 seg=_seg,
+                                 _timing=_timing,
+                                 _gmm=_gmm, 
+                                 _maxcn=_maxcn,
+                                 _reps=_reps,
+                                 toplot=toplot)
      
         results = rep.infersphase_local(cell,
                                         data,
@@ -182,7 +202,17 @@ def infer_local(cell,
                                         maxrtrdr=_maxrtrdr,
                                         quantile=_quantile,
                                         toplot=toplot)
-
+        
+        if fastsphase:
+                data = origdata.merge(data[['CELL', 'CHR', 'BIN_REPINF', 'RT_PROFILE', 'MERGED_RDR_MEDIAN', 'RT_CN_STATE', 'MERGED_CN_STATE', 'JOINT_SEG']],
+                                        on=['CELL', 'CHR', 'BIN_REPINF'],
+                                        how='outer')\
+                                .sort_values(['CHR', 'START', 'END'])\
+                                .reset_index(drop=True)
+                data['RT_PROFILE'] = np.where(~pd.isnull(data['MERGED_RDR_MEDIAN']), data['RDR'] / data['MERGED_RDR_MEDIAN'], np.nan)
+        
+        if shared_rtprofiles is not None:
+                shared_rtprofiles[cell] = data[columns + ['GC_CORR', 'RDR', 'RT_PROFILE', 'MERGED_RDR_MEDIAN', 'RT_CN_STATE', 'MERGED_CN_STATE', 'JOINT_SEG']]
         results.update(gccorr_feat)
         return results
       

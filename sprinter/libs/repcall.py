@@ -1,9 +1,10 @@
 from utils import * 
 
 from statsmodels.distributions.empirical_distribution import ECDF
-# from statsmodels.nonparametric.kde import KDEUnivariate
 from statsmodels.sandbox.nonparametric import kernels
 from statsmodels.nonparametric.kde import bandwidths, forrt, revrt, silverman_transform, fast_linbin
+
+from numba import jit
 
 
 
@@ -46,8 +47,8 @@ def infersphase_local(cell, data, seg, permutations=10000, permethod='permutatio
         pval_emp = np.sum(obsstat <= nulldis) / permutations
         a, b, loc, scale, p_of_fit, pval_fit, pval_comb = fit_and_get_pval(nulldis, obsstat, pval_emp)
     else:
-        obsstat_early, obsstat_late = tesstat(rep)
-        nulldis_early, nulldis_late = map(lambda x : np.array(x), zip(*(tesstat(perm_rep) for perm_rep in permute)))
+        obsstat_early, obsstat_late, nulldis_early, nulldis_late = sphasestats(rdr, seg, rep, permutations, quantile)        
+        
         pval_emp_early, pval_emp_late = (np.sum(obsstat_early <= nulldis_early) / permutations,
                                          np.sum(obsstat_late <= nulldis_late) / permutations)
         a_early, b_early, loc_early, scale_early, p_of_fit_early, pval_fit_early, pval_comb_early = fit_and_get_pval(nulldis_early, obsstat_early, pval_emp_early)
@@ -165,6 +166,70 @@ def choose_sumstat(_method, _bins, _maxrdr, _gridsize, _buffer, _quantile):
     else:
         assert False, 'Unknown teststat method'
     return sumstat
+
+
+@jit(nopython=True, fastmath=False, cache=True)
+def sphasestats(rdr, seg, rep, permutations, quantile):
+    allblocks, allsizes = get_parts_idx(seg)
+    allobs_E = np.empty(allblocks.shape[0], dtype=np.float64)
+    allobs_L = np.empty(allblocks.shape[0], dtype=np.float64)
+    allstats_E = np.empty((permutations, allblocks.shape[0]), dtype=np.float64)
+    allstats_L = np.empty((permutations, allblocks.shape[0]), dtype=np.float64)
+
+    for b in range(allblocks.shape[0]):
+        l = allblocks[b][0]
+        r = allblocks[b][1]
+        block_rdr = rdr[l:r].copy()
+        block_rep = rep[l:r].copy()
+
+        late = block_rdr[block_rep]
+        early = block_rdr[~block_rep]
+        allobs_E[b] = max(1., (early > late[floor(late.size * (1.0 - quantile))]).sum()) / early.size
+        allobs_L[b] = max(1., (late < early[min(ceil(early.size * quantile), early.size - 1)]).sum()) / late.size
+
+        for p in range(permutations):
+            perm_rep = np.random.permutation(block_rep)
+            late = block_rdr[perm_rep]
+            early = block_rdr[~perm_rep]
+            allstats_E[p, b] = max(1., (early > late[floor(late.size * (1.0 - quantile))]).sum()) / early.size
+            allstats_L[p, b] = max(1., (late < early[min(ceil(early.size * quantile), early.size - 1)]).sum()) / late.size
+
+    nulldis_E = np.empty(permutations, dtype=np.float64)
+    nulldis_L = np.empty(permutations, dtype=np.float64)
+    allobs_E = np.where(np.isfinite(allobs_E) & (~np.isnan(allobs_E)), allobs_E, 0.)
+    allobs_L = np.where(np.isfinite(allobs_L) & (~np.isnan(allobs_L)), allobs_L, 0.)
+    allstats_E = np.where(np.isfinite(allstats_E) & (~np.isnan(allstats_E)), allstats_E, 0.)
+    allstats_L = np.where(np.isfinite(allstats_L) & (~np.isnan(allstats_L)), allstats_L, 0.)
+
+    obsstat_E = harmonic_mean(allobs_E, weights=allsizes)
+    obsstat_L = harmonic_mean(allobs_L, weights=allsizes)
+    for p in range(permutations):
+        nulldis_E[p] = harmonic_mean(allstats_E[p], weights=allsizes)
+        nulldis_L[p] = harmonic_mean(allstats_L[p], weights=allsizes)
+
+    return obsstat_E, obsstat_L, nulldis_E, nulldis_L
+
+
+@jit(nopython=True, fastmath=False, cache=True)
+def get_parts_idx(A):
+    bidxs = np.flatnonzero(np.ediff1d(A) != 0) + 1
+    bks = np.empty(bidxs.shape[0] + 2, dtype=np.int32)
+    bks[0] = 0
+    bks[1:bidxs.shape[0]+1] = bidxs
+    bks[-1] = A.shape[0]
+    parts = np.empty((bks.shape[0] - 1, 2), dtype=np.int32)
+    sizes = np.empty(parts.shape[0], dtype=np.int32)
+    for x in range(parts.shape[0]):
+        parts[x, 0] = bks[x]
+        parts[x, 1] = bks[x+1]
+        sizes[x] = parts[x, 1] - parts[x, 0]
+    return parts, sizes
+
+
+@jit(nopython=True, fastmath=False, cache=True)
+def harmonic_mean(A, weights=None):
+    keep = ~np.isclose(A, 0.)
+    return 1.0 / np.average(1.0 / A[keep], weights=weights[keep])
 
 
 def fit_and_get_pval(nulldis, obsstat, pval_emp):

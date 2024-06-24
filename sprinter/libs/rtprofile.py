@@ -4,22 +4,43 @@ from gccorrect import quantile_gccorrect_rdr, modal_gccorrect_rdr
 
 
 
-def profile_local(cell, _data, seg, shared_rtprofiles, _timing='consistent_rt', _gmm=True, _maxcn=10, _reps=10, _maxrdr=3.0, toplot=False, 
-                  gccorr='QUANTILE', strictgc=False, nocorrgcintercept=False, gcbiases=None):
-    columns = ['CELL', 'CHR', 'START', 'END', 'GENOME', 'BIN_REPINF', 'COUNT', 'NORM_COUNT', _timing, 'GC', 'RAW_RDR']
-    data = _data[columns]
+def profile_gccorr(_data, _timing='consistent_rt', _minrdr=0.0, _maxrdr=3.0, toplot=False, 
+                  gccorr='QUANTILE', strictgc=False, nocorrgcintercept=False, gcbiases=None, fastsphase=True):
+    data = None
+    if not fastsphase:
+            data = _data
+    else:
+            data = _data.groupby(['CELL', 'CHR', 'BIN_REPINF'])\
+                        .first().reset_index()\
+                        .sort_values(['CHR', 'START', 'END'])\
+                        .reset_index(drop=True)
+    data = data[(~pd.isnull(data['RAW_RDR'])) & data['FOR_REP']].reset_index(drop=True)
+    
     if gccorr == 'QUANTILE':
-        corrrdr, gccorr_feat = quantile_gccorrect_rdr(data, gcbiases, nocorrgcintercept, strictgc, _timing, _maxrdr, toplot)
+        gccorr_feat = quantile_gccorrect_rdr(data, gcbiases, nocorrgcintercept, strictgc, _timing, _maxrdr, toplot)
     elif gccorr == 'MODAL':
-        corrrdr, gccorr_feat = modal_gccorrect_rdr(data, gcbiases, nocorrgcintercept, strictgc, _timing, _maxrdr, toplot)
+        gccorr_feat = modal_gccorrect_rdr(data, gcbiases, nocorrgcintercept, strictgc, _timing, _maxrdr, toplot)
     else:
         raise ValueError('GCCORR method does not exist! {}'.format(gccorr))
-    data['GC_CORR'] = corrrdr
-    data['RDR'] = norm_mean(data['RAW_RDR'] / data['GC_CORR'].where(data['GC_CORR'] > 0, 1.))
+    data['GC_CORR'] = data['GC'] * gccorr_feat['GC_SLOPE'] + gccorr_feat['GC_INTERCEPT']
+    data['GC_CORR'] = data['GC_CORR'].where(data['GC_CORR'] > 0, 1.)
+
+    if fastsphase:
+         data = _data.merge(data[['CELL', 'CHR', 'BIN_REPINF', 'GC_CORR']], on=['CELL', 'CHR', 'BIN_REPINF'], how='outer')\
+                     .sort_values(['CHR', 'START', 'END'])\
+                     .reset_index(drop=True)
+ 
+    data['RDR'] = norm_mean((data['RAW_RDR'] / data['GC_CORR']).clip(lower=_minrdr, upper=_maxrdr))
+    data['RDR'] = data['RDR'].clip(lower=_minrdr, upper=_maxrdr)
     assert not (data['RDR'] < 0.).any()
+    assert data['RDR'].mean() > 0.
+    return data, gccorr_feat
+
+
+def profile_local(cell, data, seg, _timing='consistent_rt', _gmm=True, _maxcn=10, _reps=10, toplot=False):
     data = data[data[_timing].isin(['early', 'late'])].sort_values(['CHR', 'START', 'END']).dropna().reset_index(drop=True)
-    data_early = segment_rt_specific(data[data[_timing]=='early'].reset_index(drop=True), _gmm, _reps, _maxcn)
-    data_late = segment_rt_specific(data[data[_timing]=='late'].reset_index(drop=True), _gmm, _reps, _maxcn)
+    data_early = segment_rt_specific(data[data[_timing]=='early'].reset_index(drop=True), _gmm, _reps, _maxcn, cell)
+    data_late = segment_rt_specific(data[data[_timing]=='late'].reset_index(drop=True), _gmm, _reps, _maxcn, cell)
     data = pd.concat((data_early, data_late)).sort_values(['CHR', 'START', 'END']).reset_index(drop=True)
     data['IS_SEG_START'] = data['IS_SEG_START'] | (data['CHR'].shift(1) != data['CHR'])
     data['SEG'] = data['IS_SEG_START'].cumsum()
@@ -27,16 +48,15 @@ def profile_local(cell, _data, seg, shared_rtprofiles, _timing='consistent_rt', 
     data = combine_segments(data, _timing, seg)
     data['RT_PROFILE'], data['MERGED_RDR_MEDIAN'] = rt_normalise(data, seg='MERGED_CN_STATE', timing=_timing)
     data['CHR_MERGED_CN_STATE'] = data['CHR'].astype(str) + ',' + data['MERGED_CN_STATE'].astype(str)
-    shared_rtprofiles[cell] = data[columns + ['GC_CORR', 'RDR', 'RT_PROFILE', 'MERGED_RDR_MEDIAN', 'RT_CN_STATE', 'MERGED_CN_STATE', 'JOINT_SEG']].reset_index(drop=True)
     if toplot: 
         plot_profile(cell, data, data_early, data_late, _timing)
-    return data, gccorr_feat
+    return data
 
 
-def segment_rt_specific(_data, _gmm, _reps, _maxcn):
+def segment_rt_specific(_data, _gmm, _reps, _maxcn, cell):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        _data['CN_STATE'] = globalhmm(_data['RDR'].values, chrs=_data['CHR'].values, gmm=_gmm, repetitions=_reps, max_components=_maxcn)[2]
+        _data['CN_STATE'] = globalhmm(_data['RDR'].values, chrs=_data['CHR'].values, gmm=_gmm, repetitions=_reps, max_components=_maxcn, max_segs=300, tprior=None)[2]
         _data['IS_SEG_START'] = (_data['CN_STATE'].shift(1) != _data['CN_STATE']) & (~_data['CN_STATE'].shift(1).isna())
         return _data
 
@@ -137,18 +157,39 @@ def combine_segments(data, timing, seg, _minsize=3):
     return data
 
 
-def rt_normalise(celldf, seg, timing, boots=1000):
+def rt_normalise(celldf, seg, timing, val='RDR', boots=1000):
     estmedian = (lambda early, late, size : np.mean([np.mean(np.concatenate((np.random.choice(early, size=size, replace=True) if len(early) > 0 else [], 
                                                                              np.random.choice(late, size=size, replace=True) if len(late) > 0 else [])))
-                                                     for _ in range(boots)]))
-    meds = celldf.groupby(seg)[['RDR', timing]].apply(lambda r : estmedian(r['RDR'][r[timing] == 'early'], 
-                                                                           r['RDR'][r[timing] == 'late'],
-                                                                           r[timing].value_counts().min()))
+                                                     for _ in range(boots)])
+                                            if len(early) > 0 or len(late) > 0 else 1.0)
+    meds = celldf.groupby(seg)[[val, timing]].apply(lambda r : estmedian(r[val][(r[timing] == 'early') & (~pd.isnull(r[val]))],
+                                                                         r[val][(r[timing] == 'late') & (~pd.isnull(r[val]))],
+                                                                         r[timing][~pd.isnull(r[val])].value_counts().min()))
     mergemedian = celldf[seg].map(meds)
-    return celldf['RDR'] / mergemedian, mergemedian
+    return celldf[val] / mergemedian, mergemedian
 
 
 def plot_profile(cell, data, data_early, data_late, timing):
+    # plot cell (with green and magenta)
+    plt.figure(figsize=(20, 4))
+    sns.scatterplot(data=data.sort_values(['CHR', 'START', 'END']).reset_index(), x='GENOME', y='RAW_RDR', hue='consistent_rt', hue_order=['early', 'late'], palette=['magenta', 'green'], s=3, legend=True)
+    plt.ylim(0,3)
+    xticks = data.groupby('CHR')['GENOME'].first()
+    plt.plot((xticks.values, xticks.values), (np.full_like(xticks, 0.0), np.full_like(xticks, 3.0)), '--b', linewidth=1.0)
+    plt.xticks(xticks.values, xticks.index, rotation=30)
+    plt.ylabel('RAW_RDR')
+    plt.xlabel('Chromosome')
+
+    # plot cell (with green and magenta)
+    plt.figure(figsize=(20, 4))
+    sns.scatterplot(data=data.sort_values(['CHR', 'START', 'END']).reset_index(), x='GENOME', y='GC_CORR', hue='consistent_rt', hue_order=['early', 'late'], palette=['magenta', 'green'], s=3, legend=True)
+    plt.ylim(0,3)
+    xticks = data.groupby('CHR')['GENOME'].first()
+    plt.plot((xticks.values, xticks.values), (np.full_like(xticks, 0.0), np.full_like(xticks, 3.0)), '--b', linewidth=1.0)
+    plt.xticks(xticks.values, xticks.index, rotation=30)
+    plt.ylabel('GC_CORR')
+    plt.xlabel('Chromosome')
+
     # plot cell (in blue)
     plt.figure(figsize=(20, 4))
     sns.scatterplot(data=data.sort_values(['CHR', 'START', 'END']).reset_index(), x='GENOME', y='RDR', s=3)
@@ -173,7 +214,6 @@ def plot_profile(cell, data, data_early, data_late, timing):
     plt.figure(figsize=(20, 4))
     sns.scatterplot(data=data_early, x='GENOME', y='RDR', hue='CN_STATE', s=3, palette='Set2', legend=False)
     plt.plot((data.groupby('CHR')['GENOME'].min(), data.groupby('CHR')['GENOME'].min()), (0, 2.5), '--k', lw=0.5)
-    plt.plot((data_early[data_early['IS_SEG_START']]['GENOME'], data_early[data_early['IS_SEG_START']]['GENOME']), (0, 2.5), '--', lw=0.3, c='blue')
     xticks = data.groupby('CHR')['GENOME'].first()
     plt.xticks(xticks.values, xticks.index, rotation=30)
     plt.ylim(0, 3)
@@ -183,7 +223,6 @@ def plot_profile(cell, data, data_early, data_late, timing):
     plt.figure(figsize=(20, 4))
     sns.scatterplot(data=data_late, x='GENOME', y='RDR', hue='CN_STATE', s=3, palette='Set2', legend=False)
     plt.plot((data.groupby('CHR')['GENOME'].min(), data.groupby('CHR')['GENOME'].min()), (0, 2.5), '--k', lw=0.5)
-    plt.plot((data_late[data_late['IS_SEG_START']]['GENOME'], data_late[data_late['IS_SEG_START']]['GENOME']), (0, 2.5), '--', lw=0.3, c='blue')
     xticks = data.groupby('CHR')['GENOME'].first()
     plt.xticks(xticks.values, xticks.index, rotation=30)
     plt.ylim(0, 3)

@@ -35,8 +35,6 @@ norm_mean = (lambda array : array / array.mean())
 get_index_safe = (lambda A, idx : A.loc[idx] if idx is not None else np.nan)
 get_prev_notna = (lambda A : pd.Series(index=A.index, data=(get_index_safe(A, A.iloc[:idx].last_valid_index()) for idx in range(A.size))))
 get_next_notna = (lambda A : pd.Series(index=A.index, data=(get_index_safe(A, A.iloc[idx+1:].first_valid_index()) for idx in range(A.size))))
-chos_prev_next = (lambda P, N : np.where(pd.isnull(P), N, P))
-prev_else_next = (lambda A : chos_prev_next(get_prev_notna(A), get_next_notna(A)))
 
 
 class ProgressBar:
