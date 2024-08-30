@@ -92,7 +92,7 @@ def parse_args(args=None, inputdata=None):
         raise ValueError('Reference genome file does not exist')
     if args.gccont is not None and args.refgenome is None and not os.path.isfile(args.gccont):
         raise ValueError('Reference genome file does not exist')
-    assert (args.refgenome is not None and not os.path.isfile(args.refgenome)) or (args.gccont is not None and not os.path.isfile(args.gccont))
+    assert (args.refgenome is not None and os.path.isfile(args.refgenome)) or (args.gccont is not None and os.path.isfile(args.gccont))
     if args.fixclones is not None and not os.path.isfile(args.fixclones):
         raise ValueError('Fixed clone file does not exist')
     # if args.fixcns is not None and not os.path.isfile(args.fixcns):
