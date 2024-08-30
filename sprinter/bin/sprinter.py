@@ -35,6 +35,10 @@ def parse_args(args=None, inputdata=None):
     # Main arguments
     if inputdata is None:
         parser.add_argument("DATA", type=str, help='Input data as a CSV/TSV dataframe with fields: CELL, CHR, START, END, GENOME, RDR, consistent_rt, and GC')
+    parser.add_argument("--rtscores", required=False, default=os.path.join(os.path.realpath(os.path.dirname(__file__)), '../../ext/rtscores.csv.gz'), type=str, help='Path to replication score file (default: os.path.join(os.path.realpath(os.path.dirname(__file__)), "../../ext/rtscores.csv.gz")')    
+    parser.add_argument("--gapsfile", required=False, default=os.path.join(os.path.realpath(os.path.dirname(__file__)), '../../ext/gaps_hg19.tsv'), type=str, help='Path to mapping gaps file (default: os.path.join(os.path.realpath(os.path.dirname(__file__)), "../../ext/gccont.csv.gz")')    
+    parser.add_argument("--refgenome", required=False, default=None, type=str, help='Path to indexed FASTA file of reference genome (default: precomputed GC content have to be provided)')    
+    parser.add_argument("--gccont", required=False, default=os.path.join(os.path.realpath(os.path.dirname(__file__)), '../../ext/gccont.csv.gz'), type=str, help='Path to gccont file (default: not used, GC content inferred from ref genome')    
     parser.add_argument("--minreads", required=False, type=int, default=100000, help="Minimum number of reads for cells (default: 100000)")
     parser.add_argument("--rtreads", required=False, type=int, default=200, help="Target RT number of reads (default: 200)")
     parser.add_argument("--cnreads", required=False, type=int, default=2000, help="Target CN number of reads (default: 2000)")
@@ -74,11 +78,21 @@ def parse_args(args=None, inputdata=None):
     parser.add_argument("--rescuethreshold", required=False, type=float, default=None, help="Fix threshold to rescue noisy cells (default: None)")
     parser.add_argument("--fastsphase", required=False, default=True, action='store_false', help='Faster mode to identify S phase cells (default: True)')
     parser.add_argument("--fastcns", required=False, default=True, action='store_false', help='Faster mode to infer CNAs (default: True)')
+    parser.add_argument("--devmode", required=False, default=False, action='store_true', help='Output and plot everything for development mode (default: False)')
 
     args = parser.parse_args(args)
 
     if inputdata is None and not os.path.isfile(args.DATA):
         raise ValueError('Data file does not exist')
+    if not os.path.isfile(args.rtscores):
+        raise ValueError('The replication-scores file does not exist: \n{}'.format(args.rtscores))
+    if not os.path.isfile(args.gapsfile):
+        raise ValueError('The gaps file does not exist: \n{}'.format(args.gapsfile))
+    if args.refgenome is not None and not os.path.isfile(args.refgenome):
+        raise ValueError('Reference genome file does not exist')
+    if args.gccont is not None and args.refgenome is None and not os.path.isfile(args.gccont):
+        raise ValueError('Reference genome file does not exist')
+    assert (args.refgenome is not None and not os.path.isfile(args.refgenome)) or (args.gccont is not None and not os.path.isfile(args.gccont))
     if args.fixclones is not None and not os.path.isfile(args.fixclones):
         raise ValueError('Fixed clone file does not exist')
     # if args.fixcns is not None and not os.path.isfile(args.fixcns):
@@ -102,6 +116,10 @@ def parse_args(args=None, inputdata=None):
 
     return {
         "data" : 'provided' if inputdata is not None else os.path.abspath(args.DATA),
+        "rtscores" : args.rtscores,
+        "gapsfile" : args.gapsfile,
+        "refgenome" : args.refgenome,
+        "gccont" : args.gccont,
         "fixclones" : args.fixclones,
         "fixcns" : None, #args.fixcns,
         "fixploidy" : None, #args.fixploidy,
@@ -138,7 +156,8 @@ def parse_args(args=None, inputdata=None):
         "propsphase" : args.propsphase,
         "strictgc" : args.strictgc,
         "fastsphase" : args.fastsphase,
-        "fastcns" : args.fastcns
+        "fastcns" : args.fastcns,
+        "devmode" : args.devmode
     }
 
 
@@ -155,8 +174,9 @@ def main(args=None, inputdata=None):
     get_size = (lambda D : (D['END'] - D['START']).mean())
     log('> Average width of RT bins: {:.1f}'.format(get_size(data.groupby(['CELL', 'BIN_REPINF']).agg({'START' : 'min', 'END' : 'max'}))), level='INFO')
     log('> Average width of CN bins: {:.1f}'.format(get_size(data.groupby(['CELL', 'BIN_CNSINF']).agg({'START' : 'min', 'END' : 'max'}))), level='INFO')
-    data.to_csv('rawdata.tsv.gz', sep='\t', index=False)
-    total_counts.to_frame('TOTAL_COUNTS').to_csv('total_counts.tsv.gz', sep='\t')
+    if args['devmode']:
+        data.to_csv('rawdata.tsv.gz', sep='\t', index=False)
+        total_counts.to_frame('TOTAL_COUNTS').to_csv('total_counts.tsv.gz', sep='\t')
     data = data[['CELL', 'CHR', 'START', 'END', 'GENOME', 'BIN_REPINF', 'BIN_CNSINF', 'BIN_GLOBAL', 'FOR_REP', 'consistent_rt', 'GC', 'RAW_RDR']]
 
     gcbiases = None
@@ -184,7 +204,8 @@ def main(args=None, inputdata=None):
                                fastsphase=args['fastsphase'])
     pvals = pvals.sort_values('CELL')
     rtprofiles = rtprofiles.sort_values(['CELL', 'CHR', 'START', 'END'])
-    rtprofiles.to_csv('rtprofiles.tsv.gz', sep='\t', index=False)
+    if args['devmode']:
+        rtprofiles.to_csv('rtprofiles.tsv.gz', sep='\t', index=False)
     data = data.merge(rtprofiles[['CELL', 'CHR', 'START', 'END', 'RT_CN_STATE', 'MERGED_CN_STATE', 'MERGED_RDR_MEDIAN', 'RDR']],
                       on=['CELL', 'CHR', 'START', 'END'],
                       how='outer')\
@@ -194,28 +215,33 @@ def main(args=None, inputdata=None):
     log('Applying multiple hypothesis correction', level='STEP')
     pvals = corrections(pvals, args['summarystat'], args['alpha'], method=args['pvalcorr'])
     log('> S-phase fraction: {:.1%}'.format(pvals['IS-S-PHASE'].sum() / len(pvals)), level='INFO')
-    pvals.to_csv('pvals.tsv.gz', sep='\t')
+    if args['devmode']:
+        pvals.to_csv('pvals.tsv.gz', sep='\t')
 
     log('Correcting S-phase cells for copy-number calling', level='STEP')
     data = rc.correct_sphase(data, pvals, cn_size=cn_size, gl_size=gl_size, fastcns=args['fastcns'], jobs=args['jobs'])
-    data.to_csv('data.tsv.gz', sep='\t', index=False)
+    if args['devmode']:
+        data.to_csv('data.tsv.gz', sep='\t', index=False)
 
     log('Calling copy numbers for G1/G2 cells', level='STEP')
     cn_g1g2 = cc.call_cns_g1g2(data, pvals, max_ploidy=args['maxploidy'], fixed_ploidy=args['fixploidy'], fixed_cns=args['fixcns'], fastcns=args['fastcns'], jobs=args['jobs'])
-    cn_g1g2.to_csv('cn_g1g2.tsv.gz', sep='\t', index=False)
+    if args['devmode']:
+        cn_g1g2.to_csv('cn_g1g2.tsv.gz', sep='\t', index=False)
 
     log('Infering G0/1/2-phase clones', level='STEP')
     clones_g1g2, normal_clones, ploidy_ref, fixedclones = ic.infer_clones(cn_g1g2, pvals, clone_threshold=args['clonethreshold'], min_no_cells=args['minnocells'], fixed_clones=args['fixclones'], fixploidyref=args['fixploidyref'], fastcns=args['fastcns'])
     log('> Base tumour ploidy identified for most cancer cells: {}'.format(ploidy_ref), level='INFO')
-    clones_g1g2.to_csv('clones_g1g2.tsv.gz', sep='\t', index=False)
+    if args['devmode']:
+        clones_g1g2.to_csv('clones_g1g2.tsv.gz', sep='\t', index=False)
     pd.Series(normal_clones, name='NORMAL_CLONE').to_csv('normal_clones.tsv.gz', sep='\t', index=False)
 
     log('Assigning S phase cells to clones', level='STEP')
     cn_all, clones_all, assignments, cn_clones = ar.assign_s_clones(data, pvals, cn_g1g2, clones_g1g2, normal_clones, rescue_threshold=args['rescuethreshold'], prop_sphase=args['propsphase'], fixedclones=fixedclones, fastcns=args['fastcns'], jobs=args['jobs'])
-    cn_all.to_csv('cn_all.tsv.gz', sep='\t', index=False)
     clones_all.to_csv('clones_all.tsv.gz', sep='\t', index=False)
     assignments.to_csv('assignments.tsv.gz', sep='\t', index=False)
     cn_clones.to_csv('cn_clones.tsv.gz', sep='\t', index=False)
+    if args['devmode']:
+        cn_all.to_csv('cn_all.tsv.gz', sep='\t', index=False)
 
     log('Correcting focal and RT-specific errors in S-phase cells', level='STEP')
     cn_all, frac_cncorrect = cncorrect.correct_sphase_cns(data=data, pvals=pvals, cn_all=cn_all, cn_clones=cn_clones, clones_all=clones_all, thres_sphase_cns=5e6)
@@ -229,10 +255,11 @@ def main(args=None, inputdata=None):
     cnrt, rtdf, cnrt_clone, rtdf_clone = rtestimate.estimate_rt(cn_all, annotations, normal_clones, jobs=args['jobs'])
     if cnrt is not None:
         log('ART frac: {:.3f}'.format(rtdf['ALTERED_RT'].sum() / len(rtdf['ALTERED_RT'])), level='INFO')
-        cnrt.to_csv('cnrt.tsv.gz', sep='\t', index=False)
         rtdf.to_csv('rtinferred_sample.tsv.gz', sep='\t', index=False)
-        cnrt_clone.to_csv('cnrt_clone.tsv.gz', sep='\t', index=False)
         rtdf_clone.to_csv('rtinferred_clones.tsv.gz', sep='\t', index=False)
+        if args['devmode']:
+            cnrt.to_csv('cnrt.tsv.gz', sep='\t', index=False)        
+            cnrt_clone.to_csv('cnrt_clone.tsv.gz', sep='\t', index=False)
     else:
         log('No aneuploid clones, or no S phase cells in these clones, have been found so RT profiles will not be estimated', level='WARN')
 

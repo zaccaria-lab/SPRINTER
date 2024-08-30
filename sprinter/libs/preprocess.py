@@ -6,11 +6,6 @@ import time
 
 
 
-repliseq_file = '/camp/project/proj-tracerx-lung/tctProjects/zaccariaLab/replication-benchmark/data/ext_data/cohort_50kb_l2r.csv'
-ref_genome = '/camp/project/proj-tracerx-lung/tracerx/_PIPELINE/TRACERx-assets/v1/reference/hg19/ucsc.hg19.fasta'
-ref_genome_1 = '/camp/project/proj-tracerx-lung/tctProjects/zaccariaLab/10X_scCNV/refdata-GRCh38-1.0.0/fasta/genome.fa'
-gaps_file = '/nemo/project/proj-tracerx-lung/tctProjects/zaccariaLab/replication-benchmark/data/ext_data/gaps_hg19.tsv'
-
 
 
 def process_input(args, inputdata):
@@ -27,6 +22,7 @@ def process_input(args, inputdata):
     data, excluded = select_cells(data, args)
     data, cn_size, gl_size = prepare_input(counts=data, rt_reads=args['rt_reads'], combine_rt=args['combine_rt'], min_rt_reads=args['min_rt_reads'], min_frac_bins=args['min_frac_bins'],
                                            cn_reads=args['cn_reads'], combine_cn=args['combine_cn'], repliseq_touse=args['repliseq'], rtdata=args['rtdata'],
+                                           rtscores=args['rtscores'], gapsfile=args['gapsfile'], refgenome=args['refgenome'], gccont=args['gccont'],
                                            nortbinning=args['nortbinning'], maxgap=args['maxgap'], j=args['jobs'])
     total_counts = data.groupby('CELL')['COUNT'].sum()
     return data, total_counts, cn_size, gl_size, excluded
@@ -41,10 +37,11 @@ def select_cells(data, args):
     return data, excluded
 
 
-def prepare_input(counts, rt_reads, combine_rt, min_rt_reads, min_frac_bins, cn_reads, combine_cn, repliseq_touse, rtdata, nortbinning=False, maxgap=5e3, maxrdr=3.0, E=.5, L=-.5, j=1):
+def prepare_input(counts, rt_reads, combine_rt, min_rt_reads, min_frac_bins, cn_reads, combine_cn, repliseq_touse, rtdata,
+                  rtscores, gapsfile, refgenome, gccont, nortbinning=False, maxgap=5e3, maxrdr=3.0, E=.5, L=-.5, j=1):
     counts = fill_count_gaps(counts)
-    counts = compute_gc_exclude_gaps(counts)
-    repliseq = prepare_repliseq(repliseq_touse)
+    counts = compute_gc_exclude_gaps(counts, gapsfile, refgenome, gccont)
+    repliseq = prepare_repliseq(repliseq_touse, rtscores)
     if rtdata is None:
         counts = combine_repliseq(counts, repliseq, E=E, L=L)
     else:
@@ -67,19 +64,19 @@ def fill_count_gaps(_data):
     return counts
 
 
-def compute_gc_exclude_gaps(count, buff_exclude=int(2e5)):
+def compute_gc_exclude_gaps(count, gapsfile, refgenome, gccont, buff_exclude=int(2e5)):
     bins = count[['CHR', 'START', 'END']].drop_duplicates()
     bins['chr'] = 'chr' + bins['CHR'].astype(str)
-    bed = None
-    try:
-        bed = BedTool.from_dataframe(bins[['chr', 'START', 'END']]).nucleotide_content(fi=ref_genome)
-    except:
-        bed = BedTool.from_dataframe(bins[['chr', 'START', 'END']]).nucleotide_content(fi=ref_genome_1)
-    bed = bed.to_dataframe(disable_auto_names=True).rename(columns={'#1_usercol' : 'chr', '2_usercol' : 'START', '3_usercol' : 'END',
-                                                                    '4_pct_at' : 'AT', '5_pct_gc' : 'GC'})
-    bed['CHR'] = bed['chr'].str.replace('chr', '').astype(int)
 
-    gaps = pd.read_csv(gaps_file, sep='\t')
+    if refgenome is not None:
+        bed = BedTool.from_dataframe(bins[['chr', 'START', 'END']]).nucleotide_content(fi=refgenome)
+        bed = bed.to_dataframe(disable_auto_names=True).rename(columns={'#1_usercol' : 'chr', '2_usercol' : 'START', '3_usercol' : 'END',
+                                                                        '4_pct_at' : 'AT', '5_pct_gc' : 'GC'})
+        bed['CHR'] = bed['chr'].str.replace('chr', '').astype(int)
+    else:
+        bed = pd.read_csv(gccont, index_col=0)
+
+    gaps = pd.read_csv(gapsfile, sep='\t')
     gaps['START_POS'] = (gaps['START_POS'] - buff_exclude).clip(lower=0)
     gaps['END_POS'] = gaps['END_POS'] + buff_exclude
     bed = bed.merge(gaps, on='CHR', how='inner')
@@ -97,7 +94,7 @@ def compute_gc_exclude_gaps(count, buff_exclude=int(2e5)):
     return count.merge(bed[['CHR', 'START', 'END', 'GC']].dropna(), on=['CHR', 'START', 'END'], how='inner')
 
 
-def prepare_repliseq(repliseq_touse):
+def prepare_repliseq(repliseq_touse, repliseq_file):
     repliseq_samples = choose_repliseq(repliseq_touse)
     repliseq = pd.read_csv(repliseq_file, sep=',')
     repliseq['CHR'] = repliseq['chr'].str.replace('chr', '').astype(int)
