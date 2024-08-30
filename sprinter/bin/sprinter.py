@@ -31,44 +31,47 @@ import rtestimate
 def parse_args(args=None, inputdata=None):
     description = "SPRINTER algorithm"
     parser = argparse.ArgumentParser(description=description)
+
+    # Main arguments
     if inputdata is None:
         parser.add_argument("DATA", type=str, help='Input data as a CSV/TSV dataframe with fields: CELL, CHR, START, END, GENOME, RDR, consistent_rt, and GC')
-    parser.add_argument("--fixploidy", required=False, default=None, type=str, help='Fixed ploidy as a CSV/TSV dataframe containing fields: CELL, PLOIDY (default: not used, ploidies are inferred by SPRINTER)')
-    parser.add_argument("--fixcns", required=False, default=None, type=str, help='Fixed baseline copy numbers as a CSV/TSV dataframe containing fields: CELL, CN_TOT, or with |-separated allele-specific CNAs in CN_STATE or HAP_CN (default: not used, copy numbers are inferred by SPRINTER)')
+    parser.add_argument("--minreads", required=False, type=int, default=100000, help="Minimum number of reads for cells (default: 100000)")
+    parser.add_argument("--rtreads", required=False, type=int, default=200, help="Target RT number of reads (default: 200)")
+    parser.add_argument("--cnreads", required=False, type=int, default=2000, help="Target CN number of reads (default: 2000)")
+    parser.add_argument("-q", "--quantile", required=False, type=float, default=0.05, help='Left-side quantile for special summary stat for test (default: 0.05)')
+    parser.add_argument("-a", "--alpha", required=False, type=float, default=0.05, help='Level of significance (default: 0.05)')
+    parser.add_argument("-o", "--output", required=False, default='sprinter.output.tsv.gz', type=str, help='Name of output (default: sprinter.output.tsv.gz)')
+    parser.add_argument("--repliseq", required=False, default='repliseq', type=str, help='Repliseq samples to use (default: repliseq, or it can be allnormal or all)')
+    parser.add_argument("--minnocells", required=False, type=int, default=20, help="Min number of cells to define clones (default: 20)")
+    parser.add_argument("--pvalcorr", required=False, default='hs', type=str, help='Pval correction method (default: hs)')
+    parser.add_argument("--propsphase", required=False, type=float, default=0.7, help="Proportion of S phase and nonreplicating cells to assign to clones (default: 0.7)")
+    parser.add_argument("--strictgc", required=False, default=False, action='store_true', help='Use stricter GC correction for more conservative S phase identification (default: False)')
+    parser.add_argument("-j", "--jobs", required=False, default=cpu_count(), type=int, help='Number of parallel jobs (default: all available)')
+    parser.add_argument("--seed", required=False, type=int, default=None, help="Random seed for replication (default: None)")
+
+    # Development arguments
+    # parser.add_argument("--fixploidy", required=False, default=None, type=str, help='Fixed ploidy as a CSV/TSV dataframe containing fields: CELL, PLOIDY (default: not used, ploidies are inferred by SPRINTER)')
+    # parser.add_argument("--fixcns", required=False, default=None, type=str, help='Fixed baseline copy numbers as a CSV/TSV dataframe containing fields: CELL, CN_TOT, or with |-separated allele-specific CNAs in CN_STATE or HAP_CN (default: not used, copy numbers are inferred by SPRINTER)')
     parser.add_argument("--fixclones", required=False, default=None, type=str, help='Fixed clones as a CSV/TSV dataframe containing fields: CELL, CLONE (default: not used, clones are inferred by SPRINTER)')
     parser.add_argument("--fixploidyref", required=False, type=float, default=None, help="Fixed the reference ploidy for tumour cells in the sample (default: None, not used)")
     parser.add_argument("-e", "--segtest", required=False, default='CHR', type=str, help='Definition of segment to use for doing the test within [CHR, JOINT_SEG, MERGED_CN_STATE, CHR_MERGED_CN_STATE, WHOLE_GENOME] (default: CHR)')
     parser.add_argument("-s", "--summarystat", required=False, default='special', type=str, help='Method for measuring overlap between distributions (default: special)')
     parser.add_argument("-m", "--meanmethod", required=False, default='weighted_min', type=str, help='Mean method across segs to use in output of test stat: weighted_min, normal, or weighted_sum (default: weighted_min)')
     parser.add_argument("-g", "--gccorr", required=False, type=str, default='QUANTILE', help='GC correction mode to be used (default: QUANTILE, available methods are QUANTILE and MODAL)')
-    parser.add_argument("-q", "--quantile", required=False, type=float, default=0.05, help='Left-side quantile for special summary stat for test (default: 0.05)')
-    parser.add_argument("-a", "--alpha", required=False, type=float, default=0.05, help='Level of significance (default: 0.05)')
-    parser.add_argument("-j", "--jobs", required=False, default=cpu_count(), type=int, help='Number of parallel jobs (default: all available)')
-    parser.add_argument("-o", "--output", required=False, default=None, type=str, help='Name of output (default: stdout)')
-    parser.add_argument("-O", "--outprofiles", required=False, default=None, type=str, help='Name of output for rtprofiles (default: not saved)')
-    parser.add_argument("--repliseq", required=False, default='repliseq', type=str, help='Repliseq samples to use (default: repliseq, or it can be allnormal or all)')
     parser.add_argument("--rtdata", required=False, default=None, type=str, help='Dataframe file with RT data (default: None)')
     parser.add_argument("--subsample", required=False, type=int, default=None, help="Random subsample of cells (default: use all cells)")
-    parser.add_argument("--minreads", required=False, type=int, default=100000, help="Minimum number of reads for cells (default: 100000)")
-    parser.add_argument("--rtreads", required=False, type=int, default=100, help="Target RT number of reads (default: 100)")
-    parser.add_argument("--cnreads", required=False, type=int, default=1000, help="Target CN number of reads (default: 1000)")
     parser.add_argument("--minrtreads", required=False, type=int, default=5, help="Min number of reads (default: 5)")
     parser.add_argument("--minfracbins", required=False, type=float, default=0.5, help="Min fraction of raw bins (default: 0.5)")
     parser.add_argument("--combinert", required=False, type=int, default=None, help="Force size of RT bins (default: None)")
     parser.add_argument("--combinecn", required=False, type=int, default=None, help="Force size of CN bins (default: None)")
     parser.add_argument("--maxgap", required=False, type=int, default=3, help="Maximum gap to allow in RT binning (default: 3)")
     parser.add_argument("--maxploidy", required=False, type=int, default=4, help="Maximum ploidy allowed in CN calling (default: 4)")
-    parser.add_argument("--seed", required=False, type=int, default=None, help="Random seed for replication (default: None)")
     parser.add_argument("--nortbinning", required=False, default=False, action='store_true', help='Do not apply RT binning (default: False)')
     parser.add_argument("--nogcaggregate", required=False, default=False, action='store_true', help='Do not compute GC biases by aggregating and correcting (default: False)')
     parser.add_argument("--nocorrgcintercept", required=False, default=False, action='store_true', help='Do not correct GC intercept per replication time (default: False)')
     parser.add_argument("--commaseparator", required=False, default=False, action='store_true', help='Use comma separators (default: tab separators)')
     parser.add_argument("--clonethreshold", required=False, type=float, default=None, help="Fix threshold to find clones (default: None)")
-    parser.add_argument("--minnocells", required=False, type=int, default=20, help="Min number of cells to define clones (default: 20)")
     parser.add_argument("--rescuethreshold", required=False, type=float, default=None, help="Fix threshold to rescue noisy cells (default: None)")
-    parser.add_argument("--pvalcorr", required=False, default='fdr_by', type=str, help='Pval correction method (default: fdr_by)')
-    parser.add_argument("--propsphase", required=False, type=float, default=0.7, help="Proportion of S phase and nonreplicating cells to assign to clones (default: 0.7)")
-    parser.add_argument("--strictgc", required=False, default=False, action='store_true', help='Use stricter GC correction for more conservative S phase identification (default: False)')
     parser.add_argument("--fastsphase", required=False, default=True, action='store_false', help='Faster mode to identify S phase cells (default: True)')
     parser.add_argument("--fastcns", required=False, default=True, action='store_false', help='Faster mode to infer CNAs (default: True)')
 
@@ -78,10 +81,10 @@ def parse_args(args=None, inputdata=None):
         raise ValueError('Data file does not exist')
     if args.fixclones is not None and not os.path.isfile(args.fixclones):
         raise ValueError('Fixed clone file does not exist')
-    if args.fixcns is not None and not os.path.isfile(args.fixcns):
-        raise ValueError('Fixed clone file does not exist')
-    if args.fixploidy is not None and not os.path.isfile(args.fixploidy):
-        raise ValueError('Fixed clone file does not exist')
+    # if args.fixcns is not None and not os.path.isfile(args.fixcns):
+    #     raise ValueError('Fixed clone file does not exist')
+    # if args.fixploidy is not None and not os.path.isfile(args.fixploidy):
+    #     raise ValueError('Fixed clone file does not exist')
     if args.rtdata is not None and not os.path.isfile(args.rtdata):
         raise ValueError('RTdata file does not exist')
     if args.seed and args.seed < 1:
@@ -100,8 +103,8 @@ def parse_args(args=None, inputdata=None):
     return {
         "data" : 'provided' if inputdata is not None else os.path.abspath(args.DATA),
         "fixclones" : args.fixclones,
-        "fixcns" : args.fixcns,
-        "fixploidy" : args.fixploidy,
+        "fixcns" : None, #args.fixcns,
+        "fixploidy" : None, #args.fixploidy,
         "fixploidyref" : args.fixploidyref,
         "segtest" : args.segtest,
         "jobs" : args.jobs,
@@ -109,7 +112,6 @@ def parse_args(args=None, inputdata=None):
         "meanmethod" : args.meanmethod,
         "commasep" : args.commaseparator,
         "output" : args.output,
-        "outprofiles" : args.outprofiles,
         "subsample" : args.subsample,
         "seed" : args.seed,
         "gccorr" : args.gccorr,
