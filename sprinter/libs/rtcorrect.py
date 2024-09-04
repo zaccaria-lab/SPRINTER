@@ -17,7 +17,7 @@ from numba import jit
 
 
 
-def correct_sphase(rtprofile, annotations, cn_size, gl_size, fastcns=True, jobs=1, minrdr=0., maxrdr=3.):
+def correct_sphase(rtprofile, annotations, cn_size, gl_size, fastcns=True, visualcn=False, jobs=1, minrdr=0., maxrdr=3.):
     data = rtprofile.merge(annotations[['CELL', 'IS-S-PHASE']], on='CELL', how='inner')
 
     nonrep = data[data['IS-S-PHASE'] == False].reset_index(drop=True)
@@ -33,14 +33,14 @@ def correct_sphase(rtprofile, annotations, cn_size, gl_size, fastcns=True, jobs=
 
     data = pd.concat([rep, nonrep])
     data['RDR_RTCORR'] = data['RDR_RTCORR'].clip(lower=minrdr, upper=maxrdr)
-    data = calc_cn_rdrs(data, cn_size=cn_size, gl_size=gl_size, issphase=annotations.groupby('CELL')['IS-S-PHASE'].first(), fastcns=fastcns, j=jobs)
+    data = calc_cn_rdrs(data, cn_size=cn_size, gl_size=gl_size, issphase=annotations.groupby('CELL')['IS-S-PHASE'].first(), fastcns=fastcns, visualcn=visualcn, j=jobs)
 
     issphase = data['CELL'].map(annotations[['CELL', 'IS-S-PHASE']].groupby('CELL')['IS-S-PHASE'].any())
     assert (~np.isinf(data['RDR_CN'].values) | issphase).all() and (~pd.isnull(data['RDR_CN'].values) | issphase).all(), data['RDR_CN']
     return data.sort_values(['CELL', 'CHR', 'START', 'END']).reset_index(drop=True)
 
 
-def calc_cn_rdrs(counts, cn_size, gl_size, issphase, fastcns, maxgap=20, min_frac_bins=.1, min_bins=4, j=1):
+def calc_cn_rdrs(counts, cn_size, gl_size, issphase, fastcns, maxgap=20, min_frac_bins=.1, min_bins=4, visualcn=False, j=1):
     with Manager() as manager:
         shared = manager.list()
         with Pool(processes=j, 
@@ -54,7 +54,8 @@ def calc_cn_rdrs(counts, cn_size, gl_size, issphase, fastcns, maxgap=20, min_fra
                             min_frac_bins,
                             min_bins,
                             issphase,
-                            fastcns)) \
+                            fastcns,
+                            visualcn)) \
         as pool:
             bar = ProgressBar(total=counts['CELL'].nunique(), length=30, verbose=False)
             progress = (lambda e : bar.progress(advance=True, msg="Cell {}".format(e)))
@@ -63,8 +64,8 @@ def calc_cn_rdrs(counts, cn_size, gl_size, issphase, fastcns, maxgap=20, min_fra
         return pd.concat(shared)
     
 
-def init_calc_cn_rdrs(_counts, _allbins, _shared, _cn_size, _gl_size, _maxgap, _min_frac_bins, _min_bins, _issphase, _fastcns):
-    global COUNTS, ALLBINS, SHARED, CN_SIZE, GL_SIZE, MAXGAP, MIN_FRAC_BINS, MIN_BINS, ISSPHASE, FASTCNS
+def init_calc_cn_rdrs(_counts, _allbins, _shared, _cn_size, _gl_size, _maxgap, _min_frac_bins, _min_bins, _issphase, _fastcns, _visualcn):
+    global COUNTS, ALLBINS, SHARED, CN_SIZE, GL_SIZE, MAXGAP, MIN_FRAC_BINS, MIN_BINS, ISSPHASE, FASTCNS, VISUALCN
     COUNTS = _counts
     ALLBINS = _allbins
     SHARED = _shared
@@ -75,6 +76,7 @@ def init_calc_cn_rdrs(_counts, _allbins, _shared, _cn_size, _gl_size, _maxgap, _
     MIN_BINS = _min_bins
     ISSPHASE = _issphase
     FASTCNS = _fastcns
+    VISUALCN = _visualcn
 
 
 def run_calc_cn_rdrs(cell, minrdr=0., maxrdr=3.):
@@ -125,9 +127,10 @@ def run_calc_cn_rdrs(cell, minrdr=0., maxrdr=3.):
         counts['RDR_CN'] = np.where(pd.isnull(counts['RDR_CN']) & (counts['RAW_RDR'] == 0.), 0., counts['RDR_CN'])
         counts['RDR_CN'] = counts['RDR_CN'].where(~pd.isnull(counts['RDR_CN']), counts['RAW_RDR'])
 
-    counts['RDR_CN'] = counts.groupby('BIN_CNSINF')['RDR_CN'].transform(boot_rdrs_cn,
-                                                                        engine='numba',
-                                                                        engine_kwargs={'nopython': True, 'nogil': True, 'cache' : True, 'fastmath' : False})
+    if not VISUALCN:
+        counts['RDR_CN'] = counts.groupby('BIN_CNSINF')['RDR_CN'].transform(boot_rdrs_cn,
+                                                                            engine='numba',
+                                                                            engine_kwargs={'nopython': True, 'nogil': True, 'cache' : True, 'fastmath' : False})
   
     counts['RDR_CN'] = counts['RDR_CN'].clip(lower=minrdr, upper=maxrdr)
     assert counts['RDR_CN'].mean() > 0.

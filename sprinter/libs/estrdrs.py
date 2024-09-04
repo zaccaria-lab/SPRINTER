@@ -4,7 +4,7 @@ from numba import jit
 
 
 
-def calc_rt_rdrs(counts, rt_size, maxgap=20, min_frac_bins=.1, min_bins=4, j=1):
+def calc_rt_rdrs(counts, rt_size, maxgap=20, min_frac_bins=.1, min_bins=4, visual=False, j=1):
     with Manager() as manager:
         shared = manager.list()
         with Pool(processes=j, 
@@ -14,7 +14,8 @@ def calc_rt_rdrs(counts, rt_size, maxgap=20, min_frac_bins=.1, min_bins=4, j=1):
                             manager.dict(rt_size.to_dict()),
                             maxgap,
                             min_frac_bins,
-                            min_bins)) \
+                            min_bins,
+                            visual)) \
         as pool:
             bar = ProgressBar(total=counts['CELL'].nunique(), length=30, verbose=False)
             progress = (lambda e : bar.progress(advance=True, msg="Cell {}".format(e)))
@@ -25,14 +26,15 @@ def calc_rt_rdrs(counts, rt_size, maxgap=20, min_frac_bins=.1, min_bins=4, j=1):
                  .reset_index(drop=True)
     
 
-def init_calc_rt_rdrs(_counts, _shared, _rt_size, _maxgap, _min_frac_bins, _min_bins):
-    global COUNTS, SHARED, RT_SIZE, MAXGAP, MIN_FRAC_BINS, MIN_BINS
+def init_calc_rt_rdrs(_counts, _shared, _rt_size, _maxgap, _min_frac_bins, _min_bins, _visual):
+    global COUNTS, SHARED, RT_SIZE, MAXGAP, MIN_FRAC_BINS, MIN_BINS, VISUAL
     COUNTS = _counts
     SHARED = _shared
     RT_SIZE = _rt_size
     MAXGAP = _maxgap
     MIN_FRAC_BINS = _min_frac_bins
     MIN_BINS = _min_bins
+    VISUAL = _visual
 
 
 def run_calc_rt_rdrs(cell, minrdr=0., maxrdr=3.):
@@ -60,9 +62,10 @@ def run_calc_rt_rdrs(cell, minrdr=0., maxrdr=3.):
                                                                                       engine='numba',
                                                                                       engine_kwargs={'nopython': True, 'nogil': True, 'cache' : True, 'fastmath' : False})
     
-    counts['RAW_RDR'] = counts.groupby('BIN_REPINF')['RAW_RDR'].transform(boot_rdrs_rt,
-                                                                          engine='numba',
-                                                                          engine_kwargs={'nopython': True, 'nogil': True, 'cache' : True, 'fastmath' : False})
+    if not VISUAL:
+        counts['RAW_RDR'] = counts.groupby('BIN_REPINF')['RAW_RDR'].transform(boot_rdrs_rt,
+                                                                            engine='numba',
+                                                                            engine_kwargs={'nopython': True, 'nogil': True, 'cache' : True, 'fastmath' : False})
     
     counts['RAW_RDR'] = counts['RAW_RDR'].clip(lower=minrdr, upper=maxrdr)
     counts['RAW_RDR'] = counts['RAW_RDR'] / counts['RAW_RDR'].mean()

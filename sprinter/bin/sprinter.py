@@ -50,6 +50,8 @@ def parse_args(args=None, inputdata=None):
     parser.add_argument("--pvalcorr", required=False, default='hs', type=str, help='Pval correction method (default: hs)')
     parser.add_argument("--propsphase", required=False, type=float, default=0.7, help="Proportion of S phase and nonreplicating cells to assign to clones (default: 0.7)")
     parser.add_argument("--strictgc", required=False, default=False, action='store_true', help='Use stricter GC correction for more conservative S phase identification (default: False)')
+    parser.add_argument("--visual", required=False, default=False, action='store_true', help='Do not bootstrap RDRs within non-overlapping windows used for replication analysis, ideal for visualization purposes (default: False)')
+    parser.add_argument("--visualcn", required=False, default=False, action='store_true', help='Do not bootstrap RDRs within non-overlapping windows used for CNA calling (default: False)')
     parser.add_argument("-j", "--jobs", required=False, default=cpu_count(), type=int, help='Number of parallel jobs (default: all available)')
     parser.add_argument("--seed", required=False, type=int, default=None, help="Random seed for replication (default: None)")
 
@@ -155,6 +157,8 @@ def parse_args(args=None, inputdata=None):
         "pvalcorr" : args.pvalcorr,
         "propsphase" : args.propsphase,
         "strictgc" : args.strictgc,
+        "visual" : args.visual,
+        "visualcn" : args.visualcn,
         "fastsphase" : args.fastsphase,
         "fastcns" : args.fastcns,
         "devmode" : args.devmode
@@ -219,7 +223,7 @@ def main(args=None, inputdata=None):
         pvals.to_csv('pvals.tsv.gz', sep='\t')
 
     log('Correcting S-phase cells for copy-number calling', level='STEP')
-    data = rc.correct_sphase(data, pvals, cn_size=cn_size, gl_size=gl_size, fastcns=args['fastcns'], jobs=args['jobs'])
+    data = rc.correct_sphase(data, pvals, cn_size=cn_size, gl_size=gl_size, fastcns=args['fastcns'], visualcn=args['visualcn'], jobs=args['jobs'])
     if args['devmode']:
         data.to_csv('data.tsv.gz', sep='\t', index=False)
 

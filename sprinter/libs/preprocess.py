@@ -23,7 +23,7 @@ def process_input(args, inputdata):
     data, cn_size, gl_size = prepare_input(counts=data, rt_reads=args['rt_reads'], combine_rt=args['combine_rt'], min_rt_reads=args['min_rt_reads'], min_frac_bins=args['min_frac_bins'],
                                            cn_reads=args['cn_reads'], combine_cn=args['combine_cn'], repliseq_touse=args['repliseq'], rtdata=args['rtdata'],
                                            rtscores=args['rtscores'], gapsfile=args['gapsfile'], refgenome=args['refgenome'], gccont=args['gccont'],
-                                           nortbinning=args['nortbinning'], maxgap=args['maxgap'], j=args['jobs'])
+                                           nortbinning=args['nortbinning'], maxgap=args['maxgap'], visual=args['visual'], j=args['jobs'])
     total_counts = data.groupby('CELL')['COUNT'].sum()
     return data, total_counts, cn_size, gl_size, excluded
 
@@ -38,7 +38,7 @@ def select_cells(data, args):
 
 
 def prepare_input(counts, rt_reads, combine_rt, min_rt_reads, min_frac_bins, cn_reads, combine_cn, repliseq_touse, rtdata,
-                  rtscores, gapsfile, refgenome, gccont, nortbinning=False, maxgap=5e3, maxrdr=3.0, E=.5, L=-.5, j=1):
+                  rtscores, gapsfile, refgenome, gccont, nortbinning=False, maxgap=5e3, maxrdr=3.0, E=.5, L=-.5, visual=False, j=1):
     counts = fill_count_gaps(counts)
     counts = compute_gc_exclude_gaps(counts, gapsfile, refgenome, gccont)
     repliseq = prepare_repliseq(repliseq_touse, rtscores)
@@ -47,7 +47,7 @@ def prepare_input(counts, rt_reads, combine_rt, min_rt_reads, min_frac_bins, cn_
     else:
         counts = prep_combine_rtdata(counts, rtdata, orig_repliseq=repliseq, E=E, L=L)
     counts, rt_size, cn_size, gl_size = define_bins(counts, rt_reads, cn_reads, combine_rt, combine_cn, nortbinning=nortbinning, maxgap=maxgap, E=E, L=L)
-    counts = calc_rt_rdrs(counts, rt_size, maxgap=20, min_frac_bins=.1, min_bins=4, j=j)
+    counts = calc_rt_rdrs(counts, rt_size, maxgap=20, min_frac_bins=.1, min_bins=4, visual=visual, j=j)
     assert counts.groupby('CELL')['START'].count().nunique() == 1
     counts = select_for_rep(counts, min_rt_reads, min_frac_bins)
     return counts, cn_size, gl_size
