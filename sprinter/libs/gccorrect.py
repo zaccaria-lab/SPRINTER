@@ -1,9 +1,7 @@
-from utils import *
-from rtsegment import globalhmm
+from .utils import *
 
 from sklearn.mixture import GaussianMixture
 import statsmodels.formula.api as smf
-from statsmodels.nonparametric.smoothers_lowess import lowess
 
 
 

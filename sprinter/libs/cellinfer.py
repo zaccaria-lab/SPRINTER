@@ -1,7 +1,6 @@
-from utils import *
-
-import rtprofile as rtp
-import repcall as rep
+from .utils import *
+from . import rtprofile as rtp
+from . import repcall as rep
 
 
 

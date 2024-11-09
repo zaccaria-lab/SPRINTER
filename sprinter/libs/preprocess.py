@@ -1,10 +1,7 @@
-from utils import *
-from estrdrs import calc_rt_rdrs
+from .utils import *
+from .estrdrs import calc_rt_rdrs
 
 from pybedtools import BedTool
-import time
-
-
 
 
 

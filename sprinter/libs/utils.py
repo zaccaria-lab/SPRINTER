@@ -4,6 +4,7 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1" 
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1" 
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 import datetime
 import subprocess as sp
 from multiprocessing import Pool, Manager
@@ -26,7 +27,16 @@ from math import floor, ceil
 from multiprocessing.sharedctypes import Value
 from unittest import skip
 
+try:
+    from importlib.resources import files as resource_files
+except ImportError:
+    from importlib_resources import path as resource_path
+    def resource_files(package):
+        return resource_path(package, '')
 
+
+
+get_resource = (lambda rfile : (resource_files("sprinter.resources") / rfile))
 
 get_consecutive = (lambda a : zip(a, np.append(a[1:], None)))
 

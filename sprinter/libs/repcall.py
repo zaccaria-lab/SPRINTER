@@ -1,9 +1,8 @@
-from utils import * 
+from .utils import * 
 
 from statsmodels.distributions.empirical_distribution import ECDF
 from statsmodels.sandbox.nonparametric import kernels
 from statsmodels.nonparametric.kde import bandwidths, forrt, revrt, silverman_transform, fast_linbin
-
 from numba import jit
 
 

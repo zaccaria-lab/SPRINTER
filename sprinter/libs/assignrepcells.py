@@ -1,8 +1,7 @@
-from utils import *
+from .utils import *
+from .callcn import infer_cns_fixed
 
-from callcn import infer_cns_fixed
 from sklearn.mixture import GaussianMixture
-from sklearn.neighbors import LocalOutlierFactor
 
 
 

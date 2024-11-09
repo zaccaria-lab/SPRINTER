@@ -1,6 +1,5 @@
-
-from utils import *
-from rtprofile import rt_normalise
+from .utils import *
+from .rtprofile import rt_normalise
 
 
 

@@ -1,4 +1,4 @@
-from utils import *
+from .utils import *
 
 from scipy.cluster import hierarchy
 from scipy.spatial.distance import pdist

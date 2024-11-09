@@ -1,7 +1,4 @@
-from utils import *
-
-import contextlib
-from multiprocessing.sharedctypes import Value
+from .utils import *
 
 from hmmlearn import hmm
 from sklearn.mixture import GaussianMixture

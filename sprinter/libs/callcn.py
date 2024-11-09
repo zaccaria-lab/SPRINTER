@@ -1,4 +1,4 @@
-from utils import *
+from .utils import *
 
 from scipy.cluster import hierarchy
 from hmmlearn import hmm

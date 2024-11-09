@@ -1,6 +1,6 @@
-from utils import *
-from rtsegment import globalhmm
-from gccorrect import quantile_gccorrect_rdr, modal_gccorrect_rdr
+from .utils import *
+from .rtsegment import globalhmm
+from .gccorrect import quantile_gccorrect_rdr, modal_gccorrect_rdr
 
 
 

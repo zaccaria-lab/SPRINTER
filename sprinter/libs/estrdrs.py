@@ -1,4 +1,4 @@
-from utils import *
+from .utils import *
 
 from numba import jit
 

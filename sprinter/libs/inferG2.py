@@ -1,8 +1,6 @@
-from utils import *
+from .utils import *
 
-import scipy
 from sklearn.neighbors import LocalOutlierFactor
-from sklearn.preprocessing import MinMaxScaler
 from statsmodels.discrete.discrete_model import NegativeBinomial
 from scipy.cluster import hierarchy
 import statsmodels.formula.api as smf
