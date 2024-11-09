@@ -18,7 +18,7 @@ setuptools.setup(
         'pandas',
         'scipy',
         'statsmodels',
-        'hmmlearn',
+        'hmmlearn>=0.2.7',
         'matplotlib',
         'pybedtools',
         'scikit-learn',

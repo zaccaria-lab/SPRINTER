@@ -7,11 +7,11 @@ import statsmodels.formula.api as smf
 
 
 
-def infer_G2(total_counts, annotations, clones_all, cn_all, normal_clones, jobs=1, toplot=True, reps=20):
+def infer_G2(total_counts, annotations, clones_all, cn_all, normal_clones, jobs=1, devmode=False, toplot=True, reps=20):
     clus = clones_all[~pd.isnull(clones_all['CLONE'])][['CELL', 'CLONE', 'IS_REASSIGNED']].reset_index(drop=True)
     clus['IS-S-PHASE'] = clus['CELL'].map(annotations.set_index('CELL')['IS-S-PHASE'])
     countsg1g2, countssphase = infer_ploidy_clones(clus, cn_all, total_counts, normal_clones, clones_all, annotations)
-    inferG2 = find_G2(countsg1g2, countssphase, clus, jobs=jobs)
+    inferG2 = find_G2(countsg1g2, countssphase, clus, jobs=jobs, devmode=devmode)
     annotations = annotations.merge(inferG2[['CELL', 'NONORM_PROB_G1', 'NONORM_PROB_G2', 'PROB_G1', 'PROB_G2', 'G1_COUNT_PVAL', 'G2_COUNT_PVAL', 'IS_G2']], on='CELL', how='left')
     annotations['IS_REASSIGNED'] = annotations['CELL'].map(clones_all.set_index('CELL')['IS_REASSIGNED'])
     annotations['TOTAL_COUNT'] = annotations['CELL'].map(total_counts)
@@ -70,7 +70,7 @@ def infer_ploidy_clones(clus, cn_all, total_counts, normal_clones, clones_all, a
     return data, countssphase
 
 
-def find_G2(counts, countssphase, clus, jobs=1, group='CLONE'):
+def find_G2(counts, countssphase, clus, jobs=1, devmode=False, group='CLONE'):
     inferG2 = None
     sthres = counts[['CELL', 'CLONE', 'PLOIDY_CLONE', 'TOTAL_COUNT']].reset_index(drop=True)
     sthres['GROUP_STHRES'] = sthres[group].map(countssphase.groupby(group)['COUNT'].mean())
@@ -85,7 +85,8 @@ def find_G2(counts, countssphase, clus, jobs=1, group='CLONE'):
                   initargs=(manager.dict({ploclone : df for ploclone, df in counts.groupby(group)}),
                             manager.dict({ploclone : df for ploclone, df in clus.groupby(group)}),
                             manager.dict(sthres),
-                            shared)) as pool:
+                            shared,
+                            devmode)) as pool:
             bar = ProgressBar(total=counts[group].nunique(), length=30, verbose=False)
             progress = (lambda e : bar.progress(advance=True, msg="Ploidy clone {}".format(e)))
             bar.progress(advance=False, msg="Started")
@@ -94,12 +95,13 @@ def find_G2(counts, countssphase, clus, jobs=1, group='CLONE'):
     return inferG2
 
 
-def init_infer_g2_perploidy(_COUNTS, _CLUS, _STHRES, _SHARED):
-    global COUNTS, CLUS, STHRES, SHARED
+def init_infer_g2_perploidy(_COUNTS, _CLUS, _STHRES, _SHARED, _DEVMODE):
+    global COUNTS, CLUS, STHRES, SHARED, DEVMODE
     COUNTS = _COUNTS
     CLUS = _CLUS
     STHRES = _STHRES
     SHARED = _SHARED
+    DEVMODE = _DEVMODE
 
 
 def infer_g2_perploidy(clone, nbinom=True, soft=True, max_frac=.5, minmax_frac=.05):
@@ -113,21 +115,24 @@ def infer_g2_perploidy(clone, nbinom=True, soft=True, max_frac=.5, minmax_frac=.
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             out = LocalOutlierFactor(n_jobs=1).fit_predict(counts_tofit.reshape(-1, 1)) == 1
-            pd.DataFrame({'COUNTS' : counts_tofit, 'OUT' : out}).to_csv('clone{}_counts_prefilter.tsv.gz'.format(clone), sep='\t')
+            if DEVMODE:
+                pd.DataFrame({'COUNTS' : counts_tofit, 'OUT' : out}).to_csv('clone{}_counts_prefilter.tsv.gz'.format(clone), sep='\t')
             counts_tofit = counts_tofit[out]
 
     maxfrac_sthres = STHRES[clone] if clone in STHRES else 0.
     if maxfrac_sthres < minmax_frac:
         maxfrac_sthres = min(num_sphase / len(counts), max_frac)
     maxfrac_sthres = max(maxfrac_sthres, minmax_frac)
-    plt.figure()
-    sns.histplot(counts_tofit)
-    plt.axvline(np.quantile(counts_tofit, 1. - maxfrac_sthres), c='red', ls='--', lw=3)
-    plt.savefig('clone{}_counts_tofit.png'.format(clone), dpi=300, bbox_inches='tight')
-    plt.title('Max G2 frac informed from S phase: {}'.format(maxfrac_sthres))
-    pd.Series(counts_tofit).rename('TOTAL_COUNT').to_csv('clone{}_counts_tofit.tsv.gz'.format(clone), sep='\t')
+    if DEVMODE:
+        plt.figure()
+        sns.histplot(counts_tofit)
+        plt.axvline(np.quantile(counts_tofit, 1. - maxfrac_sthres), c='red', ls='--', lw=3)
+        plt.savefig('clone{}_counts_tofit.png'.format(clone), dpi=300, bbox_inches='tight')
+        plt.title('Max G2 frac informed from S phase: {}'.format(maxfrac_sthres))
+        pd.Series(counts_tofit).rename('TOTAL_COUNT').to_csv('clone{}_counts_tofit.tsv.gz'.format(clone), sep='\t')
     if len(counts_tofit) > 4:
-        fracg2, exp_sfrac = importance_sampling_frac_g2(counts_tofit, np.clip(num_sphase / len(counts), .0, 1.), max_frac=maxfrac_sthres, nbinom=nbinom, soft=soft, name=clone)[:2]
+        fracg2, exp_sfrac = importance_sampling_frac_g2(counts_tofit, np.clip(num_sphase / len(counts), .0, 1.),
+                                                        max_frac=maxfrac_sthres, nbinom=nbinom, soft=soft, name=clone, devmode=DEVMODE)[:2]
         pdfg1, pdfg2, cdfg1, cdfg2 = llk_frac_g2(counts_tofit, fracg2, exp_sfrac=exp_sfrac, nbinom=nbinom, soft=soft)[2:]
         if all(r is not None for r in [pdfg1, pdfg2, cdfg1, cdfg2]):
             compg1 = pdfg1(counts['TOTAL_COUNT'])
@@ -170,7 +175,8 @@ def infer_g2_perploidy(clone, nbinom=True, soft=True, max_frac=.5, minmax_frac=.
     return '{} ({} cells)'.format(clone, len(counts_tofit))
 
 
-def importance_sampling_frac_g2(counts, _exp_sfrac, nsamples=2000, scale_above=.1, max_frac=.5, min_frac=.02, nbinom=True, soft=True, inv_nsamples=int(1e5), name=''):
+def importance_sampling_frac_g2(counts, _exp_sfrac, nsamples=2000, scale_above=.1,
+                                max_frac=.5, min_frac=.02, nbinom=True, soft=True, inv_nsamples=int(1e5), name='', devmode=False):
     max_frac = max(min_frac*2, max_frac)
     exp_sfrac = min(_exp_sfrac, max_frac)
     above_s = int((max_frac - exp_sfrac) / (max_frac - min_frac) * scale_above * nsamples)
@@ -187,9 +193,10 @@ def importance_sampling_frac_g2(counts, _exp_sfrac, nsamples=2000, scale_above=.
         fracs = fracs[fitted]
         logliks = logliks[fitted]
     assert len(fracs) > 0 and len(logliks) > 0
-    plt.figure()
-    plt.plot(fracs, logliks)
-    plt.savefig('clone{}_importance_weights.png'.format(name), dpi=300, bbox_inches='tight')
+    if devmode:
+        plt.figure()
+        plt.plot(fracs, logliks)
+        plt.savefig('clone{}_importance_weights.png'.format(name), dpi=300, bbox_inches='tight')
     weights = (logliks + np.abs(np.min(logliks))) if (logliks < 0).sum() > 0 else logliks
     cdf = (weights / weights.sum()).cumsum()
     inv_cdf = scipy.interpolate.interp1d(cdf, fracs)
@@ -198,13 +205,15 @@ def importance_sampling_frac_g2(counts, _exp_sfrac, nsamples=2000, scale_above=.
     xs = np.linspace(post_sample.min(), post_sample.max(), 100)
     post_kde = scipy.stats.gaussian_kde(post_sample)
     post_pdf = post_kde.pdf(xs)
-    plt.figure()
-    sns.histplot(post_sample, stat='density', alpha=.3, bins=100)
-    plt.plot(xs, post_pdf, '--k', lw=3)
+    if devmode:
+        plt.figure()
+        sns.histplot(post_sample, stat='density', alpha=.3, bins=100)
+        plt.plot(xs, post_pdf, '--k', lw=3)
     hist, xs = np.histogram(post_sample, bins=100)
     post_max = xs[hist.argmax()]
-    plt.axvline(post_max, ls='--', lw=4, c='r')
-    plt.savefig('clone{}_posterior_fracg2.png'.format(name), dpi=300, bbox_inches='tight')
+    if devmode:
+        plt.axvline(post_max, ls='--', lw=4, c='r')
+        plt.savefig('clone{}_posterior_fracg2.png'.format(name), dpi=300, bbox_inches='tight')
     return post_max, exp_sfrac, post_sample, post_kde
 
 

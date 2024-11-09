@@ -126,7 +126,7 @@ def parse_args(args=None, inputdata=None):
     if devargs.gccorr not in ['QUANTILE', 'MODAL', 'TEST']:
         raise ValueError("The gcorr method must be one within [QUANTILE and MODAL]!")
     if args.repliseq not in ['repliseq', 'allnormal', 'all']:
-        raise ValueError("Unknown repliseq value provided: {}, it must be either repliseq, allnormal, or all!".format(mainargs.repliseq))
+        raise ValueError("Unknown repliseq value provided: {}, it must be either repliseq, allnormal, or all!".format(args.repliseq))
     if devargs.maxgap < 1:
         raise ValueError("Maxgaps value must be at least 1!")
     if args.maxploidy < 1:
@@ -272,7 +272,7 @@ def main(args=None, inputdata=None):
     cn_all.to_csv('cn_all_corrected.tsv.gz', sep='\t', index=False)
 
     log('Infering G2 cells', level='STEP')
-    annotations = ig.infer_G2(total_counts, pvals, clones_all, cn_all, normal_clones, jobs=args['jobs'])
+    annotations = ig.infer_G2(total_counts, pvals, clones_all, cn_all, normal_clones, jobs=args['jobs'], devmode=args['devmode'])
 
     log('Estimating clone-specific RT profile', level='STEP')
     cnrt, rtdf, cnrt_clone, rtdf_clone = rtestimate.estimate_rt(cn_all, annotations, normal_clones, jobs=args['jobs'])

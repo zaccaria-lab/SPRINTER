@@ -29,10 +29,8 @@ from unittest import skip
 
 try:
     from importlib.resources import files as resource_files
-except ImportError:
-    from importlib_resources import path as resource_path
-    def resource_files(package):
-        return resource_path(package, '')
+except:
+    from importlib_resources import files as resource_files
 
 
 
