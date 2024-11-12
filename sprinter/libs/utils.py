@@ -5,6 +5,7 @@ os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1" 
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
+import re
 import datetime
 import subprocess as sp
 from multiprocessing import Pool, Manager
@@ -127,4 +128,20 @@ class bcolors:
     ENDC = '\033[0m'
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
+
+
+def add_colors(_istring, char_col):
+    istring = str(_istring)
+    for character, color in char_col:
+        matches = re.finditer(r'{}+'.format(character.replace('.', '\.')), istring)
+        result = []
+        last_end = 0    
+        for match in matches:
+            start, end = match.span()
+            result.append(istring[last_end:start])
+            result.append('{}{}{}'.format(color, match.group(), bcolors.ENDC))
+            last_end = end
+        result.append(istring[last_end:])
+        istring = ''.join(result)
+    return istring
 

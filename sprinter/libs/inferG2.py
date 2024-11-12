@@ -43,13 +43,15 @@ def infer_ploidy_clones(clus, cn_all, total_counts, normal_clones, clones_all, a
     data = data[['CELL', 'CLONE', 'PLOIDY_CLONE', 'IS_REASSIGNED']].drop_duplicates().reset_index(drop=True)
     assert not pd.isnull(data['PLOIDY_CLONE']).any()
 
-    data['RAW_TOTAL_COUNT'] = data['CELL'].map(total_counts)
-    data['PLOIDY_CELL'] = data['CELL'].map(cn_all.groupby('CELL')['CN_TOT'].mean())
-    model_reads = max((smf.quantreg('RAW_TOTAL_COUNT ~ np.exp(-PLOIDY_CELL)', data[~data['IS_REASSIGNED']]).fit(q=.5),
-                       smf.quantreg('RAW_TOTAL_COUNT ~ np.log(PLOIDY_CELL)', data[~data['IS_REASSIGNED']]).fit(q=.5)),
-                      key=(lambda x : x.prsquared))
-    data['READS_CORR'] = model_reads.predict(data[['PLOIDY_CELL']])
-    data['TOTAL_COUNT'] = ((data['RAW_TOTAL_COUNT'] / data['READS_CORR']) * data['RAW_TOTAL_COUNT'].mean()).round().astype(int)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        data['RAW_TOTAL_COUNT'] = data['CELL'].map(total_counts)
+        data['PLOIDY_CELL'] = data['CELL'].map(cn_all.groupby('CELL')['CN_TOT'].mean())
+        model_reads = max((smf.quantreg('RAW_TOTAL_COUNT ~ np.exp(-PLOIDY_CELL)', data[~data['IS_REASSIGNED']]).fit(q=.5),
+                        smf.quantreg('RAW_TOTAL_COUNT ~ np.log(PLOIDY_CELL)', data[~data['IS_REASSIGNED']]).fit(q=.5)),
+                        key=(lambda x : x.prsquared))
+        data['READS_CORR'] = model_reads.predict(data[['PLOIDY_CELL']])
+        data['TOTAL_COUNT'] = ((data['RAW_TOTAL_COUNT'] / data['READS_CORR']) * data['RAW_TOTAL_COUNT'].mean()).round().astype(int)
 
     plt.figure(figsize=(10, 10))
     sns.scatterplot(data=data, x='PLOIDY_CELL', y='RAW_TOTAL_COUNT', hue='IS_REASSIGNED')
@@ -131,9 +133,11 @@ def infer_g2_perploidy(clone, nbinom=True, soft=True, max_frac=.5, minmax_frac=.
         plt.title('Max G2 frac informed from S phase: {}'.format(maxfrac_sthres))
         pd.Series(counts_tofit).rename('TOTAL_COUNT').to_csv('clone{}_counts_tofit.tsv.gz'.format(clone), sep='\t')
     if len(counts_tofit) > 4:
-        fracg2, exp_sfrac = importance_sampling_frac_g2(counts_tofit, np.clip(num_sphase / len(counts), .0, 1.),
-                                                        max_frac=maxfrac_sthres, nbinom=nbinom, soft=soft, name=clone, devmode=DEVMODE)[:2]
-        pdfg1, pdfg2, cdfg1, cdfg2 = llk_frac_g2(counts_tofit, fracg2, exp_sfrac=exp_sfrac, nbinom=nbinom, soft=soft)[2:]
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            fracg2, exp_sfrac = importance_sampling_frac_g2(counts_tofit, np.clip(num_sphase / len(counts), .0, 1.),
+                                                            max_frac=maxfrac_sthres, nbinom=nbinom, soft=soft, name=clone, devmode=DEVMODE)[:2]
+            pdfg1, pdfg2, cdfg1, cdfg2 = llk_frac_g2(counts_tofit, fracg2, exp_sfrac=exp_sfrac, nbinom=nbinom, soft=soft)[2:]
         if all(r is not None for r in [pdfg1, pdfg2, cdfg1, cdfg2]):
             compg1 = pdfg1(counts['TOTAL_COUNT'])
             compg2 = pdfg2(counts['TOTAL_COUNT'])

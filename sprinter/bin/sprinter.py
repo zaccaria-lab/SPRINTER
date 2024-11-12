@@ -28,7 +28,7 @@ from ..libs import logo
 
 
 def parse_args(args=None, inputdata=None):
-    parser = argparse.ArgumentParser(description="The SPRINTER algorithm (Single-cell Proliferation Rate Inference in Non-homogeneous Tumors through Evolutionary Routes)\n\n{}".format(logo.SPRINTER_LOGO))
+    parser = argparse.ArgumentParser(description="The SPRINTER algorithm")
 
     # Main arguments
     if inputdata is None:
@@ -183,6 +183,10 @@ def parse_args(args=None, inputdata=None):
 
 
 def main(args=None, inputdata=None):
+    print_logo = add_colors(logo.SPRINTER_LOGO.replace('@', ' '), [('.', '\033[105m'), ('/', '\033[102m'), ('-', '\033[103m'), ('%', '\033[104m')])
+    log('The SPRINTER algorithm\n(Single-cell Proliferation Rate Inference in Non-homogeneous Tumors through Evolutionary Routes)', level='STEP')
+    log(print_logo, level=None)
+
     log('Parsing and checking arguments', level='STEP')
     args = parse_args(args, inputdata)
     np.random.seed(args['seed'])
@@ -299,9 +303,11 @@ def main(args=None, inputdata=None):
 
 
 def corrections(pvals, summarystat, alpha, method='fdr_by'):
-    pvals['REP_INF_EMP_BH'] = multipletests(pvals['PVAL_EMP'].values, alpha=alpha, method=method)[0]
-    pvals['REP_INF_FIT_BH'] = multipletests(pvals['PVAL_FIT'].values, alpha=alpha, method=method)[0]
-    pvals['REP_INF_COMB_BH'] = multipletests(pvals['PVAL_COMB'].values, alpha=alpha, method=method)[0]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        pvals['REP_INF_EMP_BH'] = multipletests(pvals['PVAL_EMP'].values, alpha=alpha, method=method)[0]
+        pvals['REP_INF_FIT_BH'] = multipletests(pvals['PVAL_FIT'].values, alpha=alpha, method=method)[0]
+        pvals['REP_INF_COMB_BH'] = multipletests(pvals['PVAL_COMB'].values, alpha=alpha, method=method)[0]
     pvals['IS-S-PHASE'] = (pvals['REP_INF_COMB_BH'] & pvals['IS_MAGENTA_HIGHER']) if summarystat not in ['mean', 'esmean', 'median', 'esmedian', 'special'] else pvals['REP_INF_COMB_BH']
     return pvals
 
