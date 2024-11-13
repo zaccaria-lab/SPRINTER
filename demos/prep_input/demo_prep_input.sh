@@ -48,7 +48,7 @@ Next the corresponding reference genome is downloaded, unpacked, and indexed.
 
 ```shell
 echo "Downloading human reference genome, please be patient as downloading time may vary."
-curl -L https://hgdownload.cse.ucsc.edu/goldenpath/hg19/bigZips/analysisSet/hg19.p13.plusMT.full_analysis_set.fa.gz | gzip -d > data/hg19.fa
+curl -L https://hgdownload.cse.ucsc.edu/goldenpath/hg19/bigZips/analysisSet/hg19.p13.plusMT.no_alt_analysis_set.fa.gz | gzip -d > data/hg19.fa
 samtools faidx data/hg19.fa
 samtools dict data/hg19.fa > data/hg19.dict
 curl -L https://hgdownload.cse.ucsc.edu/goldenpath/hg19/bigZips/analysisSet/hg19.p13.plusMT.no_alt_analysis_set.bwa_index.tar.gz | tar xvz --strip-components 1 -C data/

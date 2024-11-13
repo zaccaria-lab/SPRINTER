@@ -16,7 +16,8 @@ def infer_G2(total_counts, annotations, clones_all, cn_all, normal_clones, jobs=
     annotations['IS_REASSIGNED'] = annotations['CELL'].map(clones_all.set_index('CELL')['IS_REASSIGNED'])
     annotations['TOTAL_COUNT'] = annotations['CELL'].map(total_counts)
     annotations['BASELINE_PLOIDY'] = annotations['CELL'].map(cn_all.groupby('CELL')['CN_TOT'].apply(lambda x : est_ploidy(x, reps)))
-    annotations['IS_G2'] = annotations['IS_G2'].fillna(False)
+    with pd.option_context("future.no_silent_downcasting", True):
+        annotations['IS_G2'] = annotations['IS_G2'].fillna(False).infer_objects(copy=False)
     annotations['PREDICTED_PHASE'] = np.where(annotations['IS-S-PHASE'], 'S', np.where(annotations['IS_G2'], 'G2', 'G1'))
     annotations['PREDICTED_CLONE'] = annotations['CELL'].map(clones_all[['CELL', 'CLONE']].drop_duplicates().set_index('CELL')['CLONE'])
     if toplot: 

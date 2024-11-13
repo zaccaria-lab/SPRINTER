@@ -1,3 +1,21 @@
+# Files from demos
+*.bam*
+hg19*
+*log*
+sprinter*.gz
+clone*.png
+gccorr_*
+normal_clones*
+assignments*
+cn_*
+clones*
+*reads*
+rtinferred*
+sprinter_*.png
+raw*.png
+final_*.png
+probs_assignments*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
