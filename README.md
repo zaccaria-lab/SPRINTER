@@ -66,6 +66,8 @@ In case SPRINTER has to be manually installed, please read the [basic requiremen
 1. [Required data](#requireddata)
 2. [System requirements](#requirements)
 3. [Demos](#demos)
+4. [Recommendations and quality control](#qc)
+5. [Outputs](#outputs)
 
 <a name="requireddata"></a>
 ### Required input
@@ -77,17 +79,19 @@ In detail, the input TSV dataframe file has to contain the following columns (no
 
 | **Name** | **Description** |
 |---------|----------------|
-| CHROMOSOME | the name of a chromosome |
-| START | the start coordinate of a genomic bin |
-| END | the end coordinate of the genomic bin |
-| CELL | the name of a cell |
-| NORMAL | the number of sequencing reads from the matched-normal sample for the bin |
-| COUNT | the number of sequencing reads from the cell CELL in the bin |
-| RDR | the estimated RDR |
+| `CHR` | Chromosome name |
+| `START` | Start position of the genomic bin |
+| `END` | End position of the genomic bin |
+| `CELL` | Cell unique name |
+| `NORM_COUNT` | Number of sequencing reads from a control for the bin |
+| `COUNT` | Number of sequencing reads from the cell `CELL` in the bin |
+| `RAW_RDR` | Estimated raw, uncorrected read-depth ratio (RDR, currently ignored, it can be anything) |
 
 Example input files are available in [Zenodo](https://doi.org/10.5281/zenodo.14060547).
 
-In addition, SPRINTER requires the corresponding genome to be provided for the accurate calculation of GC content. When the reference genome is not provided, GC content pre-calculated from reference genome hg19 will be used. However, it is always reccommended to specify the reference genome in FASTA format using the argument `-r` as shown in the demos.
+In addition, SPRINTER requires the corresponding reference genome in FASTA format with the required indexes to be provided for the accurate calculation of GC content.
+When the reference genome is not provided, GC content pre-calculated from reference genome hg19 will be used.
+However, it is always reccommended to specify the reference genome in FASTA format using the argument `-r` as shown in the demos.
 
 <a name="requirements"></a>
 ### System requirements
@@ -117,7 +121,12 @@ The following recommendations guide the user in the process of quality control f
 
 | **Recommendation** | **Description** |
 |--------------------|-----------------|
-| [Tuning bin sizes](doc/rec_binsizes.md) | How to vary the size of the bins used to tune the resolution of inferred CNA and RT events. |
+| [Tuning bin sizes](doc/rec_binsizes.md) | Vary the size of the bins used to tune the resolution of inferred CNA and RT events. |
+| [Varying outlying fractions](doc/rec_outfracs.md) | Vary the expected fraction of outlying cells. |
+| [Tuning clone selection](doc/rec_selclones.md) | Tune parameters for clone selection from inferred copy numbers. |
+| [Selecting cells to analyse](doc/rec_selcells.md) | Select cells to analyse. |
+| [Tuning GC-content correction](doc/rec_gccorr.md) | Tune how strict the GC-bias correction should be. |
+| [Control cell ploidy](doc/rec_maxploidy.md) | Control the maximum cancer cell ploidy to be inferred. |
 
 
 <a name="outputs"></a>
